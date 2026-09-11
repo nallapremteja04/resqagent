@@ -62,8 +62,26 @@ async function initApp() {
     handleSignOut(true, "Your session has expired. Please sign in again.");
   });
 
+  // URL Parameter auto-login for demo, evaluation & screenshots
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('demo') === 'admin' && !getAuthToken()) {
+    try {
+      const res = await api.login('admin@resqagent.org', 'ResQAdmin2026!');
+      state.currentUser = res.user;
+    } catch (e) {
+      console.warn("Demo auto-login error:", e);
+    }
+  }
+
   // Verify authentication on startup
   await checkAuthSession();
+
+  const targetTab = urlParams.get('tab') || urlParams.get('view');
+  if (targetTab) {
+    switchView(targetTab);
+    const tabs = document.querySelectorAll('.role-tab-btn');
+    tabs.forEach(btn => btn.classList.toggle('active', btn.dataset.role === targetTab));
+  }
 }
 
 // 1. Authentication Session Guard
