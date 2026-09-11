@@ -76,11 +76,32 @@ async function initApp() {
   // Verify authentication on startup
   await checkAuthSession();
 
-  const targetTab = urlParams.get('tab') || urlParams.get('view');
+  // SPA Path Routing Support (e.g. /dashboard, /sos, /responder, /dispatcher, /admin, /login)
+  const path = window.location.pathname.toLowerCase().replace(/\/+$/, '');
+  const pathViewMap = {
+    '/login': 'login',
+    '/dashboard': 'dispatch',
+    '/dispatcher': 'dispatch',
+    '/dispatch': 'dispatch',
+    '/sos': 'citizen',
+    '/citizen': 'citizen',
+    '/responder': 'responder',
+    '/timeline': 'timeline',
+    '/report': 'report',
+    '/admin': 'admin'
+  };
+  const pathTarget = pathViewMap[path];
+
+  const targetTab = urlParams.get('tab') || urlParams.get('view') || (pathTarget && pathTarget !== 'login' ? pathTarget : null);
   if (targetTab) {
     switchView(targetTab);
     const tabs = document.querySelectorAll('.role-tab-btn');
     tabs.forEach(btn => btn.classList.toggle('active', btn.dataset.role === targetTab));
+  }
+
+  // If directly accessing /login and not authenticated, display sign-in modal
+  if (path === '/login' && !state.currentUser) {
+    showAuthOverlay('signin');
   }
 }
 

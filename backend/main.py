@@ -17,10 +17,34 @@ app = FastAPI(
     version="1.1.0"
 )
 
-# Enable CORS for frontend flexibility
+# Configure CORS for production (Vercel) and local development
+raw_cors = os.getenv("CORS_ORIGINS", "")
+frontend_url = os.getenv("FRONTEND_URL", "")
+
+default_origins = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://127.0.0.1:5500",
+    "http://localhost:5500",
+]
+
+allowed_origins = list(default_origins)
+if frontend_url:
+    clean_fe = frontend_url.strip().rstrip("/")
+    if clean_fe and clean_fe not in allowed_origins:
+        allowed_origins.append(clean_fe)
+if raw_cors:
+    for o in raw_cors.split(","):
+        cleaned = o.strip().rstrip("/")
+        if cleaned and cleaned not in allowed_origins:
+            allowed_origins.append(cleaned)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
+    allow_origin_regex=r"^https://.*\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -54,6 +78,15 @@ def ensure_admin_exists():
             print(f"[ResQAgent Security] Initial administrator account initialized: {admin_email}")
     finally:
         db.close()
+
+@app.get("/health")
+def root_health():
+    """Minimal health check endpoint for Render service monitoring"""
+    return {
+        "status": "ok",
+        "service": "resqagent-backend",
+        "version": "1.1.0"
+    }
 
 @app.get("/api/health")
 def health_check():

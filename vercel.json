@@ -1,0 +1,22 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/api/:match*",
+      "destination": "https://resqagent-backend.onrender.com/api/:match*"
+    },
+    {
+      "source": "/styles/:match*",
+      "destination": "/frontend/styles/:match*"
+    },
+    {
+      "source": "/js/:match*",
+      "destination": "/frontend/js/:match*"
+    },
+    {
+      "source": "/((?!api/|styles/|js/).*)",
+      "destination": "/frontend/index.html"
+    }
+  ]
+}

@@ -1,5 +1,37 @@
-// ResQAgent REST API Client with JWT Bearer Authentication
-const API_BASE = '/api';
+// ResQAgent REST API Client with Production & Local Dynamic Resolution
+function getApiBase() {
+  let base = '/api';
+
+  if (typeof window !== 'undefined') {
+    // 1. Explicit window override (e.g. window.RESQAGENT_API_URL = "https://resqagent.onrender.com")
+    if (window.RESQAGENT_API_URL) {
+      base = window.RESQAGENT_API_URL;
+    } else {
+      // 2. Query param override (e.g. ?api=https://resqagent.onrender.com)
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const queryUrl = params.get('api') || params.get('api_url');
+        if (queryUrl) {
+          base = queryUrl;
+          localStorage.setItem('resqagent_api_url', queryUrl);
+        } else {
+          // 3. Stored API URL from previous setting
+          const stored = localStorage.getItem('resqagent_api_url');
+          if (stored) base = stored;
+        }
+      } catch (e) {}
+    }
+  }
+
+  base = base.trim().replace(/\/+$/, '');
+
+  // If a full domain is supplied without the /api prefix, append /api
+  if ((base.startsWith('http://') || base.startsWith('https://')) && !base.endsWith('/api')) {
+    base += '/api';
+  }
+
+  return base;
+}
 
 function getAuthToken() {
   return localStorage.getItem('resqagent_token');
@@ -24,7 +56,11 @@ async function request(endpoint, options = {}) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_BASE}${endpoint}`, {
+  const base = getApiBase();
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const url = `${base}${cleanEndpoint}`;
+
+  const res = await fetch(url, {
     ...options,
     headers
   });
@@ -220,3 +256,13 @@ const api = {
 window.api = api;
 window.getAuthToken = getAuthToken;
 window.setAuthToken = setAuthToken;
+window.getApiBase = getApiBase;
+window.setApiBase = function(url) {
+  if (url) {
+    localStorage.setItem('resqagent_api_url', url);
+    window.RESQAGENT_API_URL = url;
+  } else {
+    localStorage.removeItem('resqagent_api_url');
+    delete window.RESQAGENT_API_URL;
+  }
+};
