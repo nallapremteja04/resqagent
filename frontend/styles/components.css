@@ -643,25 +643,48 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: 24px 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .auth-card {
   position: relative;
   width: 100%;
-  max-width: 440px;
+  max-width: 460px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: #ffffff;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  padding: 32px;
+  padding: 32px 28px;
   box-shadow: var(--shadow-modal);
   animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  margin: auto;
+}
+
+/* Smooth sleek scrollbar for auth card */
+.auth-card::-webkit-scrollbar {
+  width: 6px;
+}
+.auth-card::-webkit-scrollbar-track {
+  background: #f8fafc;
+  border-radius: 4px;
+}
+.auth-card::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+.auth-card::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 .btn-close-modal {
   position: absolute;
   top: 16px;
   right: 16px;
+  z-index: 10;
   width: 32px;
   height: 32px;
   border-radius: 50%;

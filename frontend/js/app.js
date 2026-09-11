@@ -395,6 +395,9 @@ function switchAuthMode(mode) {
     tabSignin.classList.toggle('active', mode === 'signin');
     tabRegister.classList.toggle('active', mode === 'register');
   }
+
+  const card = document.querySelector('.auth-card');
+  if (card) card.scrollTop = 0;
 }
 
 window.switchAuthMode = switchAuthMode;
