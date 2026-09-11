@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ResQAgent — Agentic AI Emergency Response & Coordination System</title>
+  <meta name="description" content="Autonomous Agentic AI Emergency Response System featuring closed-loop perception, triage reasoning, dynamic responder assignment, timeout monitoring, and adaptive escalation.">
+  
+  <link rel="stylesheet" href="/styles/main.css">
+  <link rel="stylesheet" href="/styles/components.css">
+  <link rel="stylesheet" href="/styles/animations.css">
+</head>
+<body>
+
+  <!-- Top Navigation & System Status Bar -->
+  <header class="top-header">
+    <div class="header-inner">
+      <div class="brand-wrapper">
+        <div class="logo-radar">
+          <span style="display:inline-block; animation: pulse-green 2s infinite;">⚡</span>
+        </div>
+        <div>
+          <h1 class="brand-title">ResQAgent</h1>
+          <div class="brand-subtitle">Emergency Response Coordination Platform</div>
+        </div>
+      </div>
+
+      <!-- Role-Filtered Navigation Tabs -->
+      <nav id="main-nav-tabs" class="role-tabs-container">
+        <button class="role-tab-btn active" data-role="citizen">
+          <span>🆘</span> Citizen SOS
+        </button>
+        <button class="role-tab-btn" data-role="responder">
+          <span>📱</span> Responder Terminal
+        </button>
+        <button class="role-tab-btn" data-role="dispatch">
+          <span>🛡️</span> Dispatch Command
+        </button>
+        <button class="role-tab-btn" data-role="timeline">
+          <span>🧠</span> AI Cognitive Inspector
+        </button>
+        <button class="role-tab-btn" data-role="report">
+          <span>📄</span> Incident Reports
+        </button>
+        <button id="tab-btn-admin" class="role-tab-btn" data-role="admin" style="display: none;">
+          <span>⚙️</span> Admin Panel
+        </button>
+      </nav>
+
+      <!-- Authenticated User Profile & Sign Out -->
+      <div id="header-auth-area">
+        <!-- Logged out state (default) -->
+        <button id="btn-open-signin" class="btn btn-primary" style="display: block; padding: 6px 14px; font-size: 12px;">
+          🔑 Sign In
+        </button>
+
+        <!-- Logged in state -->
+        <div id="header-user-profile" class="header-user-profile" style="display: none;">
+          <div class="user-info-text">
+            <div id="header-user-name" class="user-name-display">Loading...</div>
+            <div id="header-user-role" class="user-role-tag role-tag-citizen">Citizen</div>
+          </div>
+          <div class="status-dot" title="Authenticated Session Active"></div>
+          <button id="btn-signout" class="btn-signout" title="Sign out of your session">
+            Sign Out
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Pinned Hackathon Demo Quick-Bar -->
+  <div id="demo-bar" class="demo-bar">
+    <div class="demo-bar-inner">
+      <div class="demo-badge-label">
+        <span>⚡ Quick Scenario Controls:</span>
+      </div>
+      <div class="demo-actions">
+        <button id="btn-scenario-1" class="sim-btn primary" title="Run Nominal Flow: Road Accident -> Suresh Dispatched">
+          ▶ Scenario 1 (Nominal Flow)
+        </button>
+        <button id="btn-scenario-2" class="sim-btn primary" title="Run Adaptive Flow: Highway Crash -> Suresh Timeout -> Auto Escalates to Ravi">
+          ▶ Scenario 2 (Adaptive Escalation)
+        </button>
+        <button id="btn-timeout-sim" class="sim-btn danger" title="Simulates 30s SLA Timeout on Suresh to trigger Escalation Agent">
+          ⏱️ Simulate Suresh Timeout (30s SLA)
+        </button>
+        <button id="btn-reset-sim" class="sim-btn" title="Reset all demo records and restore pristine state">
+          🔄 Reset Demo Fleet
+        </button>
+        <a id="btn-download-dossier" href="/ResQAgent_Jury_Presentation_Dossier.pdf" download="ResQAgent_Jury_Presentation_Dossier.pdf" class="sim-btn" style="background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #ffffff; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; font-weight: 600;" target="_blank" title="Download Official Jury Evaluation & Defense PDF (100 Marks)">
+          📄 Download Jury PDF
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- AUTHENTICATION MODAL OVERLAY -->
+  <div id="auth-overlay" class="auth-overlay" style="display: none;" onclick="if(event.target === this) hideAuthOverlay()">
+    <div class="auth-card">
+      <button type="button" class="btn-close-modal" onclick="hideAuthOverlay()" title="Close and return to Home Page" aria-label="Close">✕</button>
+      <div class="auth-brand">
+        <div class="logo-radar" style="margin: 0 auto 12px auto; width: 44px; height: 44px;">
+          <span>⚡</span>
+        </div>
+        <h1>ResQAgent</h1>
+        <p>Emergency Response Coordination Platform</p>
+      </div>
+
+      <!-- Auth Mode Tabs -->
+      <div class="auth-tabs">
+        <button id="auth-tab-signin" class="auth-tab-btn active" onclick="switchAuthMode('signin')">Sign In</button>
+        <button id="auth-tab-register" class="auth-tab-btn" onclick="switchAuthMode('register')">Create Account</button>
+      </div>
+
+      <!-- Error / Notification Banner -->
+      <div id="auth-error-banner" class="auth-error-banner">
+        <span>⚠️</span> <span id="auth-error-text">Invalid email or password</span>
+      </div>
+
+      <!-- 1. SIGN IN FORM -->
+      <form id="signin-form">
+        <div class="form-group">
+          <label class="form-label" for="signin-email">Email or Username</label>
+          <input id="signin-email" type="email" class="form-input" placeholder="name@example.com" required autocomplete="email">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="signin-password">Password</label>
+          <input id="signin-password" type="password" class="form-input" placeholder="••••••••" required autocomplete="current-password">
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px; margin-top: 8px;">
+          Sign In
+        </button>
+
+        <div class="auth-footer-links">
+          <a onclick="switchAuthMode('forgot')">Forgot Password?</a>
+          <a onclick="switchAuthMode('register')">New Citizen? Register</a>
+        </div>
+
+        <!-- Quick Demo Credentials Fill -->
+        <div class="quick-fill-section">
+          <span class="quick-fill-label">⚡ 1-Click Role Login Fill:</span>
+          <div class="quick-fill-chips">
+            <button type="button" class="quick-chip" onclick="fillSignIn('admin@resqagent.org', 'ResQAdmin2026!')">Admin</button>
+            <button type="button" class="quick-chip" onclick="fillSignIn('dispatcher@resqagent.io', 'admin123')">Dispatcher</button>
+            <button type="button" class="quick-chip" onclick="fillSignIn('suresh@resqagent.io', 'admin123')">Responder</button>
+            <button type="button" class="quick-chip" onclick="fillSignIn('citizen@resqagent.io', 'citizen123')">Citizen</button>
+          </div>
+        </div>
+      </form>
+
+      <!-- 2. MULTI-ROLE REGISTRATION FORM -->
+      <form id="register-form" style="display: none;">
+        <!-- Role Selection Cards -->
+        <div class="form-group">
+          <label class="form-label">Select Account Role</label>
+          <div class="reg-role-selector" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+            <div class="reg-role-option selected" data-role="citizen" onclick="selectRegRole('citizen')">
+              <span class="reg-role-icon">🆘</span>
+              <div>
+                <div class="reg-role-title">Citizen</div>
+                <div class="reg-role-desc">Report SOS & distress</div>
+              </div>
+            </div>
+            <div class="reg-role-option" data-role="responder" onclick="selectRegRole('responder')">
+              <span class="reg-role-icon">🚑</span>
+              <div>
+                <div class="reg-role-title">Responder</div>
+                <div class="reg-role-desc">Field terminal & calls</div>
+              </div>
+            </div>
+            <div class="reg-role-option" data-role="dispatcher" onclick="selectRegRole('dispatcher')">
+              <span class="reg-role-icon">📡</span>
+              <div>
+                <div class="reg-role-title">Dispatcher</div>
+                <div class="reg-role-desc">Command & triage fleet</div>
+              </div>
+            </div>
+            <div class="reg-role-option" data-role="admin" onclick="selectRegRole('admin')">
+              <span class="reg-role-icon">⚙️</span>
+              <div>
+                <div class="reg-role-title">Administrator</div>
+                <div class="reg-role-desc">Master system control</div>
+              </div>
+            </div>
+          </div>
+          <input type="hidden" id="reg-selected-role" value="citizen">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="reg-name">Full Name</label>
+          <input id="reg-name" type="text" class="form-input" placeholder="e.g. Jane Doe" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="reg-email">Email Address</label>
+          <input id="reg-email" type="email" class="form-input" placeholder="jane@example.com" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="reg-phone">Phone Number</label>
+          <input id="reg-phone" type="tel" class="form-input" placeholder="+1-555-0199">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="reg-location">Base Location / Area</label>
+          <input id="reg-location" type="text" class="form-input" placeholder="Sector 4, Central District">
+        </div>
+
+        <!-- Conditional Responder Options -->
+        <div id="reg-responder-fields" style="display: none; background: #f8fafc; border: 1.5px solid var(--border-color); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
+          <div style="font-size: 11px; font-weight: 700; color: var(--accent-blue); text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.5px;">
+            🚑 Field Unit Configuration
+          </div>
+          <div class="form-group" style="margin-bottom: 10px;">
+            <label class="form-label" for="reg-resp-role">Operational Designation</label>
+            <select id="reg-resp-role" class="form-select">
+              <option value="Paramedic / First Responder">Paramedic / First Responder</option>
+              <option value="Emergency Trauma Physician">Emergency Trauma Physician</option>
+              <option value="Fire & Rescue Specialist">Fire & Rescue Specialist</option>
+              <option value="Police Patrol Officer">Police Patrol Officer</option>
+            </select>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="reg-resp-spec">Specialization</label>
+              <select id="reg-resp-spec" class="form-select">
+                <option value="Medical">Medical</option>
+                <option value="Rescue">Rescue</option>
+                <option value="Fire">Fire</option>
+                <option value="Police">Police</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="reg-resp-dist">Base Distance (km)</label>
+              <input id="reg-resp-dist" type="number" step="0.1" class="form-input" value="0.8">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="reg-password">Password (min 6 characters)</label>
+          <input id="reg-password" type="password" class="form-input" placeholder="••••••••" required minlength="6">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="reg-confirm">Confirm Password</label>
+          <input id="reg-confirm" type="password" class="form-input" placeholder="••••••••" required minlength="6">
+        </div>
+
+        <button id="reg-submit-btn" type="submit" class="btn btn-success" style="width: 100%; padding: 12px; margin-top: 8px;">
+          Create Citizen Account & Launch SOS
+        </button>
+
+        <div class="auth-footer-links" style="justify-content: center;">
+          <a onclick="switchAuthMode('signin')">Already have an account? Sign In</a>
+        </div>
+      </form>
+
+      <!-- 3. FORGOT PASSWORD FORM -->
+      <form id="forgot-form" style="display: none;">
+        <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
+          Enter your registered email address and we will dispatch a password recovery link.
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="forgot-email">Email Address</label>
+          <input id="forgot-email" type="email" class="form-input" placeholder="name@example.com" required>
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px;">
+          Send Reset Link
+        </button>
+
+        <div class="auth-footer-links" style="justify-content: center; margin-top: 16px;">
+          <a onclick="switchAuthMode('signin')">← Return to Sign In</a>
+        </div>
+      </form>
+
+    </div>
+  </div>
+
+  <!-- Main Views Container -->
+  <main class="main-wrapper">
+
+    <!-- VIEW 1: CITIZEN EMERGENCY VIEW (SOS & Submission & Active Status) -->
+    <section id="view-citizen" class="view-section active">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 24px;">
+        
+        <!-- Left: Emergency Trigger Card -->
+        <div class="glass-card">
+          <div class="card-header">
+            <h2 class="card-title"><span>🆘</span> Report Emergency</h2>
+            <span class="badge badge-p1 pulsing-alert">Live 911 Triage</span>
+          </div>
+
+          <!-- Big Glowing SOS Button -->
+          <div class="sos-centerpiece">
+            <div class="sos-btn-wrapper">
+              <div class="sos-ring"></div>
+              <div class="sos-ring"></div>
+              <button id="big-sos-btn" class="sos-btn" aria-label="One-Touch Emergency SOS">
+                <span>SOS</span>
+                <span class="sos-btn-sub">PRESS FOR HELP</span>
+              </button>
+            </div>
+            <p style="font-size: 12px; color: var(--text-muted); max-width: 280px;">
+              Press SOS for instant automated GPS distress broadcast and immediate multi-agent triage dispatch.
+            </p>
+          </div>
+
+          <div style="text-align: center; margin: 16px 0; color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">
+            — OR SUBMIT DETAILED DISTRESS REPORT —
+          </div>
+
+          <!-- Emergency Form -->
+          <form id="emergency-form">
+            <div class="form-group">
+              <label class="form-label">Select Incident Type</label>
+              <div class="type-chips-grid">
+                <div class="type-chip selected" data-type="Accident">🚗 Accident</div>
+                <div class="type-chip" data-type="Medical">🩺 Medical</div>
+                <div class="type-chip" data-type="Fire">🔥 Fire</div>
+                <div class="type-chip" data-type="Crime">🚨 Crime</div>
+                <div class="type-chip" data-type="Rescue">🌊 Rescue</div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px;">
+                <label class="form-label" for="input-desc" style="margin-bottom: 0;">What is happening? (Symptoms, casualties, hazards)</label>
+                <span id="desc-category-hint" class="badge badge-p1" style="font-size: 10px; padding: 2px 8px;">🚗 Road Collision Preset</span>
+              </div>
+              <textarea id="input-desc" class="form-textarea" placeholder="Describe the distress situation in detail..." required>Multi-vehicle collision at intersection. Two victims conscious with lacerations and airbag deployment; traffic blocked and vehicle leaking fluid.</textarea>
+              <div id="desc-scenario-details" style="margin-top: 6px; font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 6px;">
+                <span>💡</span> <span id="desc-scenario-text">Casualties: 2 injured • Hazards: Fuel leak, glass • Urgency: Immediate ambulance & traffic control</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="input-loc">Location / Coordinates</label>
+              <input id="input-loc" type="text" class="form-input" value="Crossroad of 5th Ave & Pine St, Sector 3">
+            </div>
+
+            <button type="submit" class="btn btn-danger" style="width: 100%; padding: 14px;">
+              ⚡ Submit Emergency Request
+            </button>
+          </form>
+        </div>
+
+        <!-- Right: Active Incident Live Status Tracker -->
+        <div id="active-tracker-card" class="glass-card" style="display: none;">
+          <div class="card-header">
+            <h2 class="card-title"><span>📡</span> Live Incident Tracker</h2>
+            <span id="tracker-priority" class="badge badge-p1">P1-Critical</span>
+          </div>
+
+          <div style="background: #f8fafc; border: 1px solid var(--border-color); padding: 16px; border-radius: var(--radius-md); margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+              <span id="tracker-inc-id" style="font-family: var(--font-mono); font-weight: 700; color: var(--accent-blue);">INC-101</span>
+              <span id="tracker-type" style="font-weight: 700; color: var(--text-primary);">Road Accident</span>
+            </div>
+            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 4px;">
+              📍 <span id="tracker-loc">Highway 101</span>
+            </div>
+            <p id="tracker-desc" style="font-size: 12px; color: var(--text-muted); line-height: 1.4;">
+              Emergency in progress.
+            </p>
+          </div>
+
+          <!-- Stepper Flow -->
+          <div class="stepper-container">
+            <div class="stepper-track">
+              <div id="stepper-progress-bar" class="stepper-progress" style="width: 0%;"></div>
+            </div>
+
+            <div id="step-triage" class="step-item">
+              <div class="step-bubble">1</div>
+              <div class="step-label">AI Triage</div>
+            </div>
+            <div id="step-dispatch" class="step-item">
+              <div class="step-bubble">2</div>
+              <div class="step-label">Assigned</div>
+            </div>
+            <div id="step-enroute" class="step-item">
+              <div class="step-bubble">3</div>
+              <div class="step-label">En Route</div>
+            </div>
+            <div id="step-resolved" class="step-item">
+              <div class="step-bubble">4</div>
+              <div class="step-label">Resolved</div>
+            </div>
+          </div>
+
+          <!-- Quick Navigation Actions -->
+          <div style="margin-top: 24px; display: flex; gap: 10px;">
+            <button class="btn btn-outline" style="flex: 1;" onclick="switchView('timeline')">
+              🧠 View Agent Decisions
+            </button>
+            <button id="btn-goto-responder-terminal" class="btn btn-outline" style="flex: 1;" onclick="switchView('responder')">
+              📱 View Field Terminal
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- VIEW 2: RESPONDER FIELD TERMINAL -->
+    <section id="view-responder" class="view-section">
+      <div class="glass-card" style="max-width: 760px; margin: 0 auto;">
+        
+        <div class="card-header" style="flex-wrap: wrap; gap: 12px;">
+          <div>
+            <div style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700;">Field Dispatch Terminal</div>
+            <h2 id="resp-current-name" style="font-family: var(--font-heading); font-size: 22px; color: var(--text-primary);">Suresh</h2>
+            <div id="resp-current-role" style="font-size: 13px; color: var(--text-secondary);">Paramedic / First Responder</div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div id="resp-simulator-dropdown-container">
+              <label style="font-size: 11px; color: var(--text-muted); display: block;">Simulate Unit:</label>
+              <select id="responder-selector" class="form-select" style="padding: 6px 12px; font-size: 12px;">
+                <option value="1">Suresh (Paramedic - 0.8km)</option>
+                <option value="2">Ravi (Senior Doctor - 1.5km)</option>
+                <option value="3">Priya (Trauma Nurse - 0.5km Busy)</option>
+                <option value="4">Kumar (Fire & Rescue - 3.2km)</option>
+                <option value="5">Anita (Police Officer - 4.5km)</option>
+              </select>
+            </div>
+            <span id="resp-current-status" class="badge badge-avail">AVAILABLE</span>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-bottom: 20px;">
+          <span id="resp-current-dist">0.8 km from center</span>
+          <span>🛰️ GPS Connected • Audio Alerting ON</span>
+        </div>
+
+        <!-- Incoming / Active Call Area -->
+        <div id="responder-active-call-area">
+          <!-- Populated dynamically by app.js -->
+        </div>
+
+      </div>
+    </section>
+
+    <!-- VIEW 3: DISPATCH COORDINATOR COMMAND CENTER -->
+    <section id="view-dispatch" class="view-section">
+      
+      <!-- Metrics Overview Cards -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px;">
+        <div class="glass-card" style="padding: 16px;">
+          <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Active Emergencies</div>
+          <div id="metric-active-count" style="font-family: var(--font-heading); font-size: 28px; font-weight: 800; color: #f87171;">0</div>
+        </div>
+        <div class="glass-card" style="padding: 16px;">
+          <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Available Fleet</div>
+          <div id="metric-avail-responders" style="font-family: var(--font-heading); font-size: 28px; font-weight: 800; color: #34d399;">0</div>
+        </div>
+        <div class="glass-card" style="padding: 16px;">
+          <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Autonomous SLA Target</div>
+          <div style="font-family: var(--font-heading); font-size: 28px; font-weight: 800; color: #93c5fd;">30s</div>
+        </div>
+        <div class="glass-card" style="padding: 16px;">
+          <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">System State</div>
+          <div style="font-family: var(--font-heading); font-size: 20px; font-weight: 700; color: #a78bfa; margin-top: 6px;">ADAPTIVE LOOP</div>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 24px;">
+        
+        <!-- Active Incidents Table -->
+        <div class="glass-card">
+          <div class="card-header">
+            <h2 class="card-title"><span>📋</span> Active Emergency Operations Feed</h2>
+            <button class="sim-btn" onclick="refreshAllData()">🔄 Refresh</button>
+          </div>
+          <div class="data-table-wrapper">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Incident</th>
+                  <th>Priority</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="dispatch-incidents-body">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Fleet Status Roster -->
+        <div class="glass-card">
+          <div class="card-header">
+            <h2 class="card-title"><span>🚑</span> Field Responder Fleet</h2>
+          </div>
+          <div id="dispatch-fleet-grid" class="responder-grid" style="grid-template-columns: 1fr;">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- VIEW 4: AI COGNITIVE INSPECTOR & DECISION TIMELINE -->
+    <section id="view-timeline" class="view-section">
+      <div class="glass-card" style="max-width: 900px; margin: 0 auto;">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title"><span>🧠</span> Agentic AI Cognitive Trace</h2>
+            <div id="timeline-header-id" style="font-size: 12px; color: var(--accent-blue); font-family: var(--font-mono); margin-top: 4px;">
+              Live Agent Stream
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button class="sim-btn danger" onclick="triggerTimeoutSimulation()">
+              ⚡ Trigger SLA Timeout Breach
+            </button>
+            <button class="sim-btn primary" onclick="switchView('report')">
+              📄 View Debrief Report
+            </button>
+          </div>
+        </div>
+
+        <!-- Legend -->
+        <div style="display: flex; gap: 16px; margin-bottom: 24px; padding: 10px 16px; background: #f8fafc; border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 11px; flex-wrap: wrap;">
+          <span>🟣 <strong>Analysis Agent</strong> (Triage)</span>
+          <span>🔵 <strong>Selection Agent</strong> (Ranking)</span>
+          <span>🟢 <strong>Communication Agent</strong> (Alerts)</span>
+          <span>🟡 <strong>Monitoring Agent</strong> (Heartbeat)</span>
+          <span>🔴 <strong>Escalation Agent</strong> (Adaptive Reassignment)</span>
+        </div>
+
+        <!-- Vertical Stream -->
+        <div id="cognitive-timeline-stream" class="timeline-stream">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 5: FINAL INCIDENT REPORT -->
+    <section id="view-report" class="view-section">
+      <div id="report-display-container" style="max-width: 900px; margin: 0 auto;">
+        <!-- Populated dynamically -->
+      </div>
+    </section>
+
+    <!-- VIEW 6: ADMINISTRATOR CONTROL PANEL -->
+    <section id="view-admin" class="view-section">
+      <div class="glass-card" style="margin-bottom: 24px;">
+        <div class="card-header">
+          <h2 class="card-title"><span>⚙️</span> System Administration & User Management</h2>
+          <button class="btn btn-primary" style="padding: 6px 14px; font-size: 12px;" onclick="toggleAdminCreateForm()">
+            + Create Authorized User
+          </button>
+        </div>
+
+        <!-- Create User Form Drawer (Collapsible) -->
+        <div id="admin-create-user-panel" style="display: none; background: #f8fafc; border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 20px; margin-bottom: 24px;">
+          <h3 style="font-family: var(--font-heading); font-size: 15px; color: var(--text-primary); margin-bottom: 14px;">
+            Provision Authorized Account
+          </h3>
+          <form id="admin-create-user-form">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+              <div class="form-group">
+                <label class="form-label">Full Name</label>
+                <input id="admin-new-name" type="text" class="form-input" placeholder="e.g. Officer Ravi" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Email</label>
+                <input id="admin-new-email" type="email" class="form-input" placeholder="ravi@resqagent.org" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Password</label>
+                <input id="admin-new-pwd" type="password" class="form-input" placeholder="••••••••" required minlength="6">
+              </div>
+              <div class="form-group">
+                <label class="form-label">System Role</label>
+                <select id="admin-new-role" class="form-select" onchange="toggleResponderParams(this.value)">
+                  <option value="dispatcher">Dispatcher</option>
+                  <option value="responder">Responder</option>
+                  <option value="admin">Administrator</option>
+                  <option value="citizen">Citizen</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Conditional Responder Fields -->
+            <div id="admin-responder-fields" style="display: none; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+              <div class="form-group">
+                <label class="form-label">Operational Role</label>
+                <input id="admin-resp-role" type="text" class="form-input" value="Paramedic Specialist">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Specialization</label>
+                <select id="admin-resp-spec" class="form-select">
+                  <option value="Medical">Medical</option>
+                  <option value="Rescue">Rescue</option>
+                  <option value="Fire">Fire</option>
+                  <option value="Police">Police</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Simulated Distance (km)</label>
+                <input id="admin-resp-dist" type="number" step="0.1" class="form-input" value="1.5">
+              </div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px;">
+              <button type="button" class="btn btn-outline" onclick="toggleAdminCreateForm()">Cancel</button>
+              <button type="submit" class="btn btn-success">Save & Provision Account</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Users Table -->
+        <div class="data-table-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="admin-users-table-body">
+              <!-- Populated dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Load API and App scripts -->
+  <script src="/js/api.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
