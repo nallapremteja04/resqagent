@@ -95,7 +95,7 @@ def get_assignments(
     if status_filter:
         query = query.filter(Assignment.assignment_status == status_filter.upper())
 
-    return query.order_by(Assignment.assigned_at.desc()).all()
+    return query.order_by(Assignment.assigned_at.desc(), Assignment.id.desc()).all()
 
 @router.post("/{assignment_id}/respond", response_model=AssignmentResponse)
 def responder_respond(
@@ -106,12 +106,20 @@ def responder_respond(
     db: Session = Depends(get_db)
 ):
     """
-    Responder accepts or rejects an assigned mission.
+    Responder accepts or declines an assigned mission.
     Enforces that responders only respond to their own unit's assignment.
+    Prevents race conditions: rejects responding to assignments that have already timed out or completed.
     """
     assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
+    
+    # Race condition safety: only PENDING assignments can be accepted or declined
+    if assignment.assignment_status != "PENDING":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Assignment is no longer pending (Current status: {assignment.assignment_status}). Cannot respond after timeout or completion."
+        )
     
     # Ownership guard for responder role (Admins are exempt)
     if current_user.role == "responder":
@@ -126,11 +134,11 @@ def responder_respond(
     incident = db.query(Incident).filter(Incident.id == assignment.incident_id).first()
     
     new_status = action_in.status.upper()
-    assignment.assignment_status = new_status
     assignment.responded_at = datetime.utcnow()
     assignment.notes = action_in.notes or assignment.notes
     
     if new_status == "ACCEPTED":
+        assignment.assignment_status = "ACCEPTED"
         if responder:
             responder.availability = "BUSY"
         if incident:
@@ -149,12 +157,13 @@ def responder_respond(
             incident_id=assignment.incident_id,
             recipient_type="USER",
             recipient_name=incident.reporter_name if incident else "Citizen",
-            message=f"Help is on the way! Responder {responder.name if responder else ''} has accepted your request.",
+            message="Responder accepted the emergency assignment.",
             channel="SMS"
         )
         db.add(notification)
 
-    elif new_status == "REJECTED":
+    elif new_status in ["REJECTED", "DECLINED"]:
+        assignment.assignment_status = "DECLINED"
         if responder:
             responder.availability = "AVAILABLE"
             responder.active_incident_id = None
@@ -163,11 +172,21 @@ def responder_respond(
             
         timeline_event = IncidentTimeline(
             incident_id=assignment.incident_id,
-            event_type="DISPATCH_REJECTED",
-            description=f"Responder {responder.name if responder else 'Responder'} DECLINED call.",
+            event_type="DISPATCH_DECLINED",
+            description=f"Responder {responder.name if responder else 'Responder'} DECLINED assignment.",
             actor=responder.name if responder else current_user.name
         )
         db.add(timeline_event)
+
+        # Notify dispatch
+        notification = Notification(
+            incident_id=assignment.incident_id,
+            recipient_type="DISPATCH",
+            recipient_name="Regional Emergency Dispatch",
+            message="Responder declined the assignment. Finding another responder.",
+            channel="RADIO"
+        )
+        db.add(notification)
         
         # Trigger Escalation Agent
         try:
@@ -178,6 +197,81 @@ def responder_respond(
 
     db.commit()
     db.refresh(assignment)
+    return assignment
+
+@router.post("/{assignment_id}/timeout", response_model=AssignmentResponse)
+def timeout_assignment(
+    assignment_id: int,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(require_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Handles assignment timeout when the 30-second acceptance timer expires without response.
+    Idempotent and race-condition safe: if assignment is not PENDING, returns current state.
+    """
+    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    # Race condition check: if already accepted or declined, do nothing
+    if assignment.assignment_status != "PENDING":
+        return assignment
+
+    responder = db.query(Responder).filter(Responder.id == assignment.responder_id).first()
+    incident = db.query(Incident).filter(Incident.id == assignment.incident_id).first()
+
+    assignment.assignment_status = "TIMEOUT"
+    assignment.responded_at = datetime.utcnow()
+    assignment.notes = "SLA Timeout: Responder did not respond within 30 seconds."
+
+    if responder:
+        responder.availability = "AVAILABLE"
+        responder.active_incident_id = None
+
+    if incident:
+        incident.status = "NO_RESPONSE"
+
+    timeline_event = IncidentTimeline(
+        incident_id=assignment.incident_id,
+        event_type="SLA_TIMEOUT_EXPIRED",
+        description=f"Responder {responder.name if responder else 'Unit'} TIMED OUT (30s SLA expired). Escalating.",
+        actor="Monitoring Agent"
+    )
+    db.add(timeline_event)
+
+    # Required notification: "No response received. Escalating to another responder."
+    notification = Notification(
+        incident_id=assignment.incident_id,
+        recipient_type="DISPATCH",
+        recipient_name="Regional Emergency Dispatch",
+        message="No response received. Escalating to another responder.",
+        channel="RADIO"
+    )
+    db.add(notification)
+
+    if incident and incident.reporter_name:
+        db.add(Notification(
+            incident_id=assignment.incident_id,
+            recipient_type="USER",
+            recipient_name=incident.reporter_name,
+            message="No response received from assigned responder. System is escalating to another unit.",
+            channel="SMS"
+        ))
+
+    db.commit()
+    db.refresh(assignment)
+
+    try:
+        from backend.agents.orchestrator import run_escalation_cycle
+        background_tasks.add_task(
+            run_escalation_cycle,
+            incident.id,
+            reason=f"SLA Timeout: Responder {responder.name if responder else 'Unit'} did not respond within 30 seconds"
+        )
+    except ImportError:
+        pass
+
     return assignment
 
 @router.post("/{assignment_id}/progress", response_model=AssignmentResponse)

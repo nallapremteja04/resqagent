@@ -25,8 +25,8 @@ class CommunicationAgent:
 
         # 1. Alert to Responder
         resp_msg = (
-            f"🚨 PRIORITY DISPATCH ({incident.priority}): {incident.emergency_type} at {incident.location}. "
-            f"Details: {incident.description}. Please confirm and accept immediately."
+            f"New emergency assignment. Please respond within 30 seconds. "
+            f"({incident.priority} {incident.emergency_type} at {incident.location}: {incident.description})"
         )
         n_resp = Notification(
             incident_id=incident.id,
@@ -97,8 +97,8 @@ class CommunicationAgent:
 
         # 1. Alert to New Responder
         resp_msg = (
-            f"⚠️ RE-ROUTED URGENT DISPATCH ({incident.priority}): {incident.emergency_type} at {incident.location}. "
-            f"Prior unit was unable to respond. Please accept assistance call immediately."
+            f"New emergency assignment. Please respond within 30 seconds. "
+            f"(Re-routed from {failed_responder_name}: {incident.priority} {incident.emergency_type} at {incident.location})"
         )
         notifications.append(Notification(
             incident_id=incident.id,

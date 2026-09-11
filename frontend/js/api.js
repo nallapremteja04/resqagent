@@ -177,6 +177,12 @@ const api = {
     });
   },
 
+  async timeoutAssignment(assignmentId) {
+    return request(`/assignments/${assignmentId}/timeout`, {
+      method: 'POST'
+    });
+  },
+
   async updateAssignmentProgress(assignmentId, status, notes = '') {
     return request(`/assignments/${assignmentId}/progress`, {
       method: 'POST',

@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
@@ -11,7 +12,7 @@ class MonitoringAgent:
     and assistance progress. Flags anomalies and timeout breaches.
     """
 
-    DEFAULT_TIMEOUT_SECONDS = 30  # Optimized for 30-hour MVP live demo
+    DEFAULT_TIMEOUT_SECONDS = int(os.getenv("RESPONDER_TIMEOUT_SECONDS", "30"))
 
     @classmethod
     def check_assignment_health(

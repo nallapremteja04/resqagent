@@ -401,6 +401,10 @@ function clearAuthError() {
 }
 
 async function handleSignOut(expired = false, msg = "Signed out successfully.") {
+  stopResponderAcceptanceTimer();
+  if (typeof window.cancelSosCountdown === 'function') {
+    window.cancelSosCountdown();
+  }
   await api.logout();
   stopPolling();
   onUnauthenticated();
@@ -430,6 +434,13 @@ function switchView(role) {
   const targetSec = document.getElementById(`view-${role}`);
   if (targetSec) targetSec.classList.add('active');
 
+  if (role !== 'responder') {
+    stopResponderAcceptanceTimer();
+  }
+  if (role !== 'citizen' && typeof window.cancelSosCountdown === 'function') {
+    window.cancelSosCountdown();
+  }
+
   // Trigger role-specific renders
   if (role === 'dispatch') renderDispatchBoard();
   if (role === 'responder') renderResponderTerminal();
@@ -447,12 +458,21 @@ function startPolling() {
   state.pollingTimer = setInterval(() => {
     refreshAllData();
   }, 3000);
+  state.clockTimer = setInterval(() => {
+    if (state.currentRole === 'dispatch') {
+      updateDispatchBoardTimers();
+    }
+  }, 1000);
 }
 
 function stopPolling() {
   if (state.pollingTimer) {
     clearInterval(state.pollingTimer);
     state.pollingTimer = null;
+  }
+  if (state.clockTimer) {
+    clearInterval(state.clockTimer);
+    state.clockTimer = null;
   }
 }
 
@@ -589,16 +609,36 @@ function setupCitizenForm() {
     });
   });
 
-  const sosBtn = document.getElementById('big-sos-btn');
-  sosBtn?.addEventListener('click', async () => {
-    if (!state.currentUser) {
-      showAuthOverlay('signin', 'Please sign in or register as a citizen to broadcast emergency SOS.');
-      return;
+  let sosCountdownTimer = null;
+  let sosRemainingSeconds = 30;
+
+  function cancelSosCountdown() {
+    if (sosCountdownTimer) {
+      clearInterval(sosCountdownTimer);
+      sosCountdownTimer = null;
+    }
+    const countdownBox = document.getElementById('sos-countdown-container');
+    const btnWrapper = document.getElementById('sos-btn-wrapper');
+    const subtext = document.getElementById('sos-help-subtext');
+
+    if (countdownBox) countdownBox.style.display = 'none';
+    if (btnWrapper) btnWrapper.style.display = 'flex';
+    if (subtext) subtext.style.display = 'block';
+
+    playTone(440, 'triangle', 0.15);
+    showToast('SOS broadcast cancelled.', 'warning');
+  }
+
+  window.cancelSosCountdown = cancelSosCountdown;
+
+  async function executeExistingSosBroadcast() {
+    const sosBtn = document.getElementById('big-sos-btn');
+    if (sosBtn) {
+      sosBtn.disabled = true;
+      sosBtn.innerText = 'TRIGGERING...';
     }
 
     playSirenPing();
-    sosBtn.disabled = true;
-    sosBtn.innerText = 'TRIGGERING...';
 
     try {
       const payload = {
@@ -611,13 +651,65 @@ function setupCitizenForm() {
       state.activeIncident = created;
       showToast('Emergency SOS Broadcasted! AI Agents dispatched.', 'danger');
       await refreshAllData();
-      document.getElementById('active-tracker-card').style.display = 'block';
+      const trackerCard = document.getElementById('active-tracker-card');
+      if (trackerCard) trackerCard.style.display = 'block';
     } catch (err) {
       showToast('Failed to send SOS: ' + err.message, 'danger');
     } finally {
-      sosBtn.disabled = false;
-      sosBtn.innerHTML = '<span>SOS</span><span class="sos-btn-sub">PRESS FOR HELP</span>';
+      if (sosBtn) {
+        sosBtn.disabled = false;
+        sosBtn.innerHTML = '<span>SOS</span><span class="sos-btn-sub">PRESS FOR HELP</span>';
+      }
     }
+  }
+
+  const sosBtn = document.getElementById('big-sos-btn');
+  sosBtn?.addEventListener('click', () => {
+    if (!state.currentUser) {
+      showAuthOverlay('signin', 'Please sign in or register as a citizen to broadcast emergency SOS.');
+      return;
+    }
+
+    if (sosCountdownTimer) return; // Prevent multiple timers
+
+    playAlertChime();
+
+    const countdownBox = document.getElementById('sos-countdown-container');
+    const btnWrapper = document.getElementById('sos-btn-wrapper');
+    const subtext = document.getElementById('sos-help-subtext');
+    const numberEl = document.getElementById('sos-countdown-number');
+
+    if (btnWrapper) btnWrapper.style.display = 'none';
+    if (subtext) subtext.style.display = 'none';
+    if (countdownBox) countdownBox.style.display = 'flex';
+
+    sosRemainingSeconds = 30;
+    if (numberEl) numberEl.innerText = sosRemainingSeconds;
+
+    sosCountdownTimer = setInterval(async () => {
+      sosRemainingSeconds--;
+      if (numberEl) numberEl.innerText = sosRemainingSeconds;
+
+      if (sosRemainingSeconds <= 5 && sosRemainingSeconds > 0) {
+        playTone(880, 'sine', 0.06);
+      }
+
+      if (sosRemainingSeconds <= 0) {
+        clearInterval(sosCountdownTimer);
+        sosCountdownTimer = null;
+
+        if (countdownBox) countdownBox.style.display = 'none';
+        if (btnWrapper) btnWrapper.style.display = 'flex';
+        if (subtext) subtext.style.display = 'block';
+
+        // 30 seconds completed: Execute EXISTING SOS functionality
+        await executeExistingSosBroadcast();
+      }
+    }, 1000);
+  });
+
+  document.getElementById('sos-cancel-btn')?.addEventListener('click', () => {
+    cancelSosCountdown();
   });
 
   const form = document.getElementById('emergency-form');
@@ -710,11 +802,97 @@ function renderCitizenTracker() {
   }
 }
 
-// 6. Responder Terminal
+// 6. Responder Terminal & Acceptance Timer Engine
+let responderAcceptanceTimer = null;
+let currentActiveAssignmentId = null;
+let isResponderActionPending = false;
+
+function parseUtcDate(dateStr) {
+  if (!dateStr) return Date.now();
+  const str = String(dateStr);
+  const utcStr = (str.endsWith('Z') || str.includes('+')) ? str : str + 'Z';
+  const parsed = new Date(utcStr).getTime();
+  return isNaN(parsed) ? Date.now() : parsed;
+}
+
+function startResponderAcceptanceTimer(assignmentId, assignedAtStr) {
+  const assignedAt = parseUtcDate(assignedAtStr);
+
+  const updateTick = async () => {
+    const elapsed = Math.floor((Date.now() - assignedAt) / 1000);
+    const remaining = Math.max(0, 30 - elapsed);
+
+    const displayEl = document.getElementById('resp-timer-display');
+    const countEl = document.getElementById('resp-sec-count');
+    if (displayEl) {
+      displayEl.innerText = `00:${remaining < 10 ? '0' + remaining : remaining}`;
+      if (remaining <= 10) {
+        displayEl.classList.add('urgent');
+      } else {
+        displayEl.classList.remove('urgent');
+      }
+    }
+    if (countEl) countEl.innerText = remaining;
+
+    if (remaining <= 5 && remaining > 0) {
+      playTone(660, 'sine', 0.05);
+    }
+
+    if (remaining <= 0) {
+      stopResponderAcceptanceTimer();
+      await handleAssignmentTimeout(assignmentId);
+    }
+  };
+
+  if (responderAcceptanceTimer && currentActiveAssignmentId === assignmentId) {
+    updateTick(); // Fast update on re-rendered DOM without resetting running interval
+    return;
+  }
+
+  stopResponderAcceptanceTimer();
+  currentActiveAssignmentId = assignmentId;
+
+  updateTick();
+  responderAcceptanceTimer = setInterval(updateTick, 1000);
+}
+
+function stopResponderAcceptanceTimer() {
+  if (responderAcceptanceTimer) {
+    clearInterval(responderAcceptanceTimer);
+    responderAcceptanceTimer = null;
+  }
+  currentActiveAssignmentId = null;
+}
+
+async function handleAssignmentTimeout(assignmentId) {
+  if (isResponderActionPending) return;
+  isResponderActionPending = true;
+
+  stopResponderAcceptanceTimer();
+
+  const btnAccept = document.getElementById('resp-btn-accept');
+  const btnDecline = document.getElementById('resp-btn-decline');
+  if (btnAccept) btnAccept.disabled = true;
+  if (btnDecline) btnDecline.disabled = true;
+
+  try {
+    playSirenPing();
+    showToast("No response received. Escalating to another responder.", "danger");
+    await api.timeoutAssignment(assignmentId);
+    await refreshAllData();
+  } catch (e) {
+    console.warn("Assignment timeout notice:", e.message);
+    await refreshAllData();
+  } finally {
+    isResponderActionPending = false;
+  }
+}
+
 function setupResponderTerminal() {
   const respSelect = document.getElementById('responder-selector');
   respSelect?.addEventListener('change', (e) => {
     state.currentResponderId = parseInt(e.target.value);
+    stopResponderAcceptanceTimer();
     renderResponderTerminal();
   });
 }
@@ -757,6 +935,7 @@ async function renderResponderTerminal() {
   const activeAssignment = assignments.find(a => ['PENDING', 'ACCEPTED', 'EN_ROUTE', 'ON_SCENE'].includes(a.assignment_status));
 
   if (!activeAssignment) {
+    stopResponderAcceptanceTimer();
     container.innerHTML = `
       <div style="text-align: center; padding: 50px 20px; color: var(--text-muted);">
         <div style="font-size: 38px; margin-bottom: 12px;">📡</div>
@@ -770,65 +949,138 @@ async function renderResponderTerminal() {
   const inc = await api.getIncident(activeAssignment.incident_id).catch(() => null);
   if (!inc) return;
 
-  container.innerHTML = `
-    <div class="glass-card" style="border: 2px solid ${activeAssignment.assignment_status === 'PENDING' ? 'var(--accent-amber)' : 'var(--accent-emerald)'};">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <span class="badge ${inc.priority === 'P1-Critical' ? 'badge-p1' : 'badge-p2'}">${inc.priority}</span>
-          <span style="font-family: var(--font-mono); color: var(--text-muted); font-size: 12px;">INC-${inc.id}</span>
+  if (activeAssignment.assignment_status === 'PENDING') {
+    const elapsed = Math.floor((Date.now() - parseUtcDate(activeAssignment.assigned_at)) / 1000);
+    const initialRemaining = Math.max(0, 30 - elapsed);
+    const clockText = `00:${initialRemaining < 10 ? '0' + initialRemaining : initialRemaining}`;
+
+    if (initialRemaining <= 0) {
+      stopResponderAcceptanceTimer();
+      handleAssignmentTimeout(activeAssignment.id);
+      return;
+    }
+
+    container.innerHTML = `
+      <div class="glass-card" style="border: 2px solid var(--accent-amber); box-shadow: 0 4px 20px rgba(245, 158, 11, 0.15);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span class="pulsing-alert-dot"></span>
+            <span style="font-family: var(--font-heading); font-size: 14px; font-weight: 800; letter-spacing: 0.5px; color: var(--accent-amber); text-transform: uppercase;">
+              NEW EMERGENCY ASSIGNMENT
+            </span>
+          </div>
+          <span class="badge badge-busy">PENDING CONFIRMATION</span>
         </div>
-        <span class="badge ${activeAssignment.assignment_status === 'PENDING' ? 'badge-busy' : 'badge-avail'}">
-          ${activeAssignment.assignment_status}
-        </span>
-      </div>
 
-      <h2 style="font-family: var(--font-heading); font-size: 20px; color: var(--text-primary); margin-bottom: 8px;">
-        🚨 ${inc.emergency_type} Emergency
-      </h2>
-      <p style="font-size: 14px; color: var(--text-primary); margin-bottom: 14px; background: #f8fafc; border: 1px solid var(--border-color); padding: 12px 14px; border-radius: var(--radius-sm);">
-        ${inc.description}
-      </p>
+        <div style="background: #f8fafc; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+            <div style="font-size: 14px; color: var(--text-primary);">
+              <strong style="color: var(--text-muted);">Emergency:</strong> ${inc.emergency_type}
+            </div>
+            <div>
+              <strong style="color: var(--text-muted); font-size: 13px;">Priority:</strong> 
+              <span class="badge ${inc.priority === 'P1-Critical' ? 'badge-p1' : inc.priority === 'P2-High' ? 'badge-p2' : 'badge-p3'}">${inc.priority || 'HIGH'}</span>
+            </div>
+          </div>
+          <div style="font-size: 13px; color: var(--text-primary); margin-bottom: 6px;">
+            <strong style="color: var(--text-muted);">Location:</strong> ${inc.location}
+          </div>
+          <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.4;">
+            <strong style="color: var(--text-muted);">Details:</strong> ${inc.description}
+          </div>
+        </div>
 
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 13px; margin-bottom: 20px;">
-        <div><strong style="color: var(--text-muted);">Location:</strong> ${inc.location}</div>
-        <div><strong style="color: var(--text-muted);">Caller:</strong> ${inc.reporter_name || 'Citizen'}</div>
-        <div><strong style="color: var(--text-muted);">Attempt:</strong> #${activeAssignment.attempt_number}</div>
-        <div><strong style="color: var(--text-muted);">Assigned At:</strong> ${new Date(activeAssignment.assigned_at).toLocaleTimeString()}</div>
-      </div>
+        <!-- Countdown Acceptance Box -->
+        <div class="resp-timer-box">
+          <div class="resp-timer-left">
+            <div class="resp-timer-label">Response Required</div>
+            <div class="resp-timer-sub">Accept in: <span id="resp-sec-count">${initialRemaining}</span>s</div>
+          </div>
+          <div id="resp-timer-display" class="resp-timer-clock ${initialRemaining <= 10 ? 'urgent' : ''}">${clockText}</div>
+        </div>
 
-      <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-        ${activeAssignment.assignment_status === 'PENDING' ? `
-          <button class="btn btn-success" style="flex: 1;" onclick="handleResponderAction(${activeAssignment.id}, 'ACCEPTED')">
-            ✓ ACCEPT CALL (DISPATCH)
+        <div style="display: flex; gap: 12px;">
+          <button id="resp-btn-accept" class="btn btn-success" style="flex: 1; padding: 12px; font-weight: 700; font-size: 14px;" onclick="handleResponderAction(${activeAssignment.id}, 'ACCEPTED')">
+            [ ACCEPT ]
           </button>
-          <button class="btn btn-danger" style="flex: 1;" onclick="handleResponderAction(${activeAssignment.id}, 'REJECTED')">
-            ✕ DECLINE / BUSY
+          <button id="resp-btn-decline" class="btn btn-danger" style="flex: 1; padding: 12px; font-weight: 700; font-size: 14px;" onclick="handleResponderAction(${activeAssignment.id}, 'DECLINED')">
+            [ DECLINE ]
           </button>
-        ` : activeAssignment.assignment_status === 'ACCEPTED' ? `
-          <button class="btn btn-primary" style="flex: 1;" onclick="handleProgressAction(${activeAssignment.id}, 'EN_ROUTE')">
-            🚗 MARK EN ROUTE
-          </button>
-          <button class="btn btn-success" style="flex: 1;" onclick="handleProgressAction(${activeAssignment.id}, 'COMPLETED')">
-            🏁 MARK COMPLETED
-          </button>
-        ` : `
-          <button class="btn btn-success" style="flex: 1;" onclick="handleProgressAction(${activeAssignment.id}, 'COMPLETED')">
-            ✓ MARK ASSISTANCE COMPLETED & RESOLVED
-          </button>
-        `}
+        </div>
       </div>
-    </div>
-  `;
+    `;
+    startResponderAcceptanceTimer(activeAssignment.id, activeAssignment.assigned_at);
+  } else {
+    stopResponderAcceptanceTimer();
+    container.innerHTML = `
+      <div class="glass-card" style="border: 2px solid var(--accent-emerald);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span class="badge ${inc.priority === 'P1-Critical' ? 'badge-p1' : 'badge-p2'}">${inc.priority}</span>
+            <span style="font-family: var(--font-mono); color: var(--text-muted); font-size: 12px;">INC-${inc.id}</span>
+          </div>
+          <span class="badge badge-avail">
+            ${activeAssignment.assignment_status}
+          </span>
+        </div>
+
+        <h2 style="font-family: var(--font-heading); font-size: 20px; color: var(--text-primary); margin-bottom: 8px;">
+          🚨 ${inc.emergency_type} Emergency
+        </h2>
+        <p style="font-size: 14px; color: var(--text-primary); margin-bottom: 14px; background: #f8fafc; border: 1px solid var(--border-color); padding: 12px 14px; border-radius: var(--radius-sm);">
+          ${inc.description}
+        </p>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 13px; margin-bottom: 20px;">
+          <div><strong style="color: var(--text-muted);">Location:</strong> ${inc.location}</div>
+          <div><strong style="color: var(--text-muted);">Caller:</strong> ${inc.reporter_name || 'Citizen'}</div>
+          <div><strong style="color: var(--text-muted);">Attempt:</strong> #${activeAssignment.attempt_number}</div>
+          <div><strong style="color: var(--text-muted);">Assigned At:</strong> ${new Date(parseUtcDate(activeAssignment.assigned_at)).toLocaleTimeString()}</div>
+        </div>
+
+        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+          ${activeAssignment.assignment_status === 'ACCEPTED' ? `
+            <button class="btn btn-primary" style="flex: 1;" onclick="handleProgressAction(${activeAssignment.id}, 'EN_ROUTE')">
+              🚗 MARK EN ROUTE
+            </button>
+            <button class="btn btn-success" style="flex: 1;" onclick="handleProgressAction(${activeAssignment.id}, 'COMPLETED')">
+              🏁 MARK COMPLETED
+            </button>
+          ` : `
+            <button class="btn btn-success" style="flex: 1;" onclick="handleProgressAction(${activeAssignment.id}, 'COMPLETED')">
+              ✓ MARK ASSISTANCE COMPLETED & RESOLVED
+            </button>
+          `}
+        </div>
+      </div>
+    `;
+  }
 }
 
 window.handleResponderAction = async (assignmentId, status) => {
+  if (isResponderActionPending) return;
+  isResponderActionPending = true;
+
+  stopResponderAcceptanceTimer();
+
+  const btnAccept = document.getElementById('resp-btn-accept');
+  const btnDecline = document.getElementById('resp-btn-decline');
+  if (btnAccept) btnAccept.disabled = true;
+  if (btnDecline) btnDecline.disabled = true;
+
   try {
     playAlertChime();
     await api.respondToAssignment(assignmentId, status);
-    showToast(`Assignment marked ${status}!`, status === 'ACCEPTED' ? 'success' : 'warning');
+    showToast(
+      status === 'ACCEPTED' ? 'Responder accepted the emergency assignment.' : 'Responder declined the assignment. Finding another responder.',
+      status === 'ACCEPTED' ? 'success' : 'warning'
+    );
     await refreshAllData();
   } catch (e) {
     showToast(e.message, 'danger');
+    await refreshAllData();
+  } finally {
+    isResponderActionPending = false;
   }
 };
 
@@ -844,6 +1096,21 @@ window.handleProgressAction = async (assignmentId, status) => {
 };
 
 // 7. Dispatch Coordinator Dashboard
+function updateDispatchBoardTimers() {
+  document.querySelectorAll('.dispatch-timer-clock').forEach(el => {
+    const raw = el.dataset.assignedAt;
+    if (!raw) return;
+    const elapsed = Math.floor((Date.now() - parseUtcDate(raw)) / 1000);
+    const remaining = Math.max(0, 30 - elapsed);
+    el.innerText = `00:${remaining < 10 ? '0' + remaining : remaining}`;
+    if (remaining <= 10) {
+      el.classList.add('urgent');
+    } else {
+      el.classList.remove('urgent');
+    }
+  });
+}
+
 async function renderDispatchBoard(incidentsList = null) {
   const incidents = incidentsList || await api.getIncidents().catch(() => []);
   const responders = await api.getResponders().catch(() => []);
@@ -879,34 +1146,57 @@ async function renderDispatchBoard(incidentsList = null) {
   const tableBody = document.getElementById('dispatch-incidents-body');
   if (tableBody) {
     if (incidents.length === 0) {
-      tableBody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted);">No operational incidents recorded.</td></tr>`;
+      tableBody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted);">No operational incidents recorded.</td></tr>`;
       return;
     }
 
-    tableBody.innerHTML = incidents.map(inc => `
-      <tr style="cursor: pointer;" onclick="selectIncidentForDetail(${inc.id})">
-        <td><strong style="font-family: var(--font-mono); color: var(--accent-blue);">INC-${inc.id}</strong></td>
-        <td>
-          <span class="badge ${inc.priority === 'P1-Critical' ? 'badge-p1' : inc.priority === 'P2-High' ? 'badge-p2' : 'badge-p3'}">
-            ${inc.priority || 'Triage'}
-          </span>
-        </td>
-        <td>${inc.emergency_type}</td>
-        <td style="max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-          ${inc.description}
-        </td>
-        <td>
-          <span style="font-size: 12px; color: ${inc.status === 'RESOLVED' ? '#34d399' : '#fde68a'}; font-weight: 600;">
-            ${inc.status}
-          </span>
-        </td>
-        <td>
-          <button class="sim-btn primary" style="font-size: 11px;" onclick="selectIncidentForDetail(${inc.id})">
-            Inspect
-          </button>
-        </td>
-      </tr>
-    `).join('');
+    tableBody.innerHTML = incidents.map(inc => {
+      const assignedResp = responders.find(r => r.id === inc.assigned_responder_id);
+      const respName = assignedResp ? assignedResp.name : (inc.assigned_responder_id ? `Unit #${inc.assigned_responder_id}` : '—');
+
+      let statusBadge = '';
+      let timerActionDisplay = '';
+
+      if (inc.status === 'WAITING_FOR_RESPONSE') {
+        const rawTime = inc.updated_at || inc.created_at;
+        const elapsed = Math.floor((Date.now() - parseUtcDate(rawTime)) / 1000);
+        const remaining = Math.max(0, 30 - elapsed);
+        statusBadge = `<span class="badge badge-busy">WAITING FOR RESPONSE</span>`;
+        timerActionDisplay = `<span class="resp-timer-clock dispatch-timer-clock ${remaining <= 10 ? 'urgent' : ''}" data-assigned-at="${rawTime}" style="font-size: 13px; padding: 2px 8px;">00:${remaining < 10 ? '0' + remaining : remaining}</span>`;
+      } else if (inc.status === 'NO_RESPONSE') {
+        statusBadge = `<span class="badge badge-p1">TIMEOUT</span>`;
+        timerActionDisplay = `<span style="color: #ef4444; font-weight: 700; font-size: 11px;">ESCALATING...</span>`;
+      } else if (inc.status === 'ASSISTANCE_IN_PROGRESS') {
+        statusBadge = `<span class="badge badge-avail">IN_PROGRESS</span>`;
+        timerActionDisplay = `<span style="color: var(--accent-emerald); font-size: 12px; font-weight: 600;">ACTIVE</span>`;
+      } else if (inc.status === 'RESOLVED') {
+        statusBadge = `<span class="badge badge-avail">RESOLVED</span>`;
+        timerActionDisplay = `<span style="color: var(--text-muted); font-size: 12px;">RESOLVED</span>`;
+      } else {
+        statusBadge = `<span class="badge">${inc.status}</span>`;
+        timerActionDisplay = `<span style="color: var(--text-muted); font-size: 12px;">—</span>`;
+      }
+
+      return `
+        <tr style="cursor: pointer;" onclick="selectIncidentForDetail(${inc.id})">
+          <td><strong style="font-family: var(--font-mono); color: var(--accent-blue);">INC-${inc.id}</strong></td>
+          <td>
+            <span class="badge ${inc.priority === 'P1-Critical' ? 'badge-p1' : inc.priority === 'P2-High' ? 'badge-p2' : 'badge-p3'}">
+              ${inc.priority || 'Triage'}
+            </span>
+          </td>
+          <td>${inc.emergency_type}</td>
+          <td><strong>${respName}</strong></td>
+          <td>${statusBadge}</td>
+          <td>${timerActionDisplay}</td>
+          <td>
+            <button class="sim-btn primary" style="font-size: 11px;" onclick="selectIncidentForDetail(${inc.id})">
+              Inspect
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join('');
   }
 }
 

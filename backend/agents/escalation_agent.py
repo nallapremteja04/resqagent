@@ -101,7 +101,7 @@ class EscalationAgent:
         new_responder.availability = "PENDING_CONFIRMATION"
         new_responder.active_incident_id = incident.id
         incident.assigned_responder_id = new_responder.id
-        incident.status = "RESPONDER_ASSIGNED"
+        incident.status = "WAITING_FOR_RESPONSE"
         db.commit()
 
         # 4. Record cognitive action

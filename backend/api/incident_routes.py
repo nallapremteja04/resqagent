@@ -6,6 +6,8 @@ from datetime import datetime
 from backend.database.db import get_db
 from backend.models.user import User
 from backend.models.incident import Incident
+from backend.models.assignment import Assignment
+from backend.models.responder import Responder
 from backend.models.incident_timeline import IncidentTimeline
 from backend.models.agent_action import AgentAction
 from backend.models.notification import Notification
@@ -74,6 +76,46 @@ def create_incident(
 
     return incident
 
+def check_timed_out_assignments(db: Session):
+    """Auto-detects and escalates assignments exceeding 30s SLA window."""
+    pending_assignments = (
+        db.query(Assignment)
+        .filter(Assignment.assignment_status == "PENDING")
+        .all()
+    )
+    for pa in pending_assignments:
+        if pa.assigned_at and (datetime.utcnow() - pa.assigned_at).total_seconds() > 30:
+            pa.assignment_status = "TIMEOUT"
+            pa.responded_at = datetime.utcnow()
+            pa.notes = "SLA Timeout: Responder did not acknowledge within 30-second window."
+            resp = db.query(Responder).filter(Responder.id == pa.responder_id).first()
+            if resp:
+                resp.availability = "AVAILABLE"
+                resp.active_incident_id = None
+            inc = db.query(Incident).filter(Incident.id == pa.incident_id).first()
+            if inc:
+                inc.status = "NO_RESPONSE"
+            
+            db.add(IncidentTimeline(
+                incident_id=pa.incident_id,
+                event_type="SLA_TIMEOUT_EXPIRED",
+                description=f"Responder {resp.name if resp else 'Unit'} TIMED OUT (30s SLA expired). Escalating.",
+                actor="Monitoring Agent"
+            ))
+            db.add(Notification(
+                incident_id=pa.incident_id,
+                recipient_type="DISPATCH",
+                recipient_name="Regional Emergency Dispatch",
+                message="No response received. Escalating to another responder.",
+                channel="RADIO"
+            ))
+            db.commit()
+            try:
+                from backend.agents.orchestrator import run_escalation_cycle
+                run_escalation_cycle(pa.incident_id, reason="SLA Timeout Expired (30s Window)")
+            except Exception:
+                pass
+
 @router.get("/", response_model=List[IncidentResponse])
 def get_incidents(
     status_filter: Optional[str] = None,
@@ -86,6 +128,9 @@ def get_incidents(
     - Citizens: Only their own submitted incidents.
     - Dispatchers / Admins / Responders: All operational incidents.
     """
+    # Keep operational assignments fresh by auto-escalating any that breached SLA
+    check_timed_out_assignments(db)
+
     query = db.query(Incident)
 
     if current_user.role == "citizen":
