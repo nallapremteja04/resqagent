@@ -238,6 +238,49 @@ function triggerGlobalSos() {
 }
 window.triggerGlobalSos = triggerGlobalSos;
 
+// Geolocation & GPS Auto-Detection (HTML5 Geolocation API)
+window.lastGpsCoords = null;
+
+function detectGpsLocation(inputId, statusId) {
+  if (!navigator.geolocation) {
+    showToast("Geolocation is not supported by your browser.", "warning");
+    return;
+  }
+  const statusEl = statusId ? document.getElementById(statusId) : null;
+  if (statusEl) {
+    statusEl.innerHTML = `<span style="color: #2563eb; font-weight: 600;">🛰️ Acquiring live GPS signal...</span>`;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const lat = pos.coords.latitude.toFixed(5);
+      const lon = pos.coords.longitude.toFixed(5);
+      const acc = Math.round(pos.coords.accuracy);
+      window.lastGpsCoords = { lat, lon, acc };
+
+      const input = document.getElementById(inputId);
+      if (input) {
+        input.value = `${lat}, ${lon} (GPS Live)`;
+        input.style.borderColor = '#10b981';
+      }
+      if (statusEl) {
+        statusEl.innerHTML = `<span style="color: #059669; font-weight: 600;">📍 GPS Acquired: ${lat}, ${lon} (±${acc}m)</span>`;
+      }
+      showToast(`GPS Acquired: ${lat}, ${lon}`, "success");
+    },
+    (err) => {
+      let msg = "GPS unavailable. Please enter location manually.";
+      if (err.code === 1) msg = "GPS permission denied. Using manual location mode.";
+      if (statusEl) {
+        statusEl.innerHTML = `<span style="color: #d97706; font-size: 11px;">⚠️ ${msg}</span>`;
+      }
+      showToast(msg, "warning");
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+  );
+}
+window.detectGpsLocation = detectGpsLocation;
+
 // 2. Authentication UI & Form Handlers
 function setupAuthForms() {
   document.getElementById('btn-signout')?.addEventListener('click', () => {
@@ -717,10 +760,14 @@ function setupCitizenForm() {
     try {
       const rolePrefix = state.currentUser?.role ? state.currentUser.role.toUpperCase() : 'CITIZEN';
       const userName = state.currentUser?.name || '';
+      let sosLocation = state.currentUser?.location || 'Downtown Sector 4';
+      if (window.lastGpsCoords) {
+        sosLocation = `${window.lastGpsCoords.lat}, ${window.lastGpsCoords.lon} (GPS Live)`;
+      }
       const payload = {
         emergency_type: 'Accident',
         description: `CRITICAL ONE-TOUCH SOS: Severe distress reported by ${rolePrefix} ${userName}, victim in urgent need of assistance.`,
-        location: state.currentUser?.location || 'Downtown Sector 4'
+        location: sosLocation
       };
       const created = await api.createIncident(payload);
       state.activeIncidentId = created.id;
@@ -747,6 +794,21 @@ function setupCitizenForm() {
     }
 
     if (sosCountdownTimer) return; // Prevent multiple timers
+
+    // Opportunistically acquire real-time GPS position during countdown
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          window.lastGpsCoords = {
+            lat: pos.coords.latitude.toFixed(5),
+            lon: pos.coords.longitude.toFixed(5),
+            acc: Math.round(pos.coords.accuracy)
+          };
+        },
+        () => {},
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 }
+      );
+    }
 
     playAlertChime();
 

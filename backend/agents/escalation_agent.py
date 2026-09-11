@@ -78,7 +78,8 @@ class EscalationAgent:
             db=db,
             emergency_type=incident.emergency_type,
             priority=incident.priority,
-            exclude_responder_ids=excluded_ids
+            exclude_responder_ids=excluded_ids,
+            location=incident.location
         )
 
         new_responder = selection_result.get("selected_responder")

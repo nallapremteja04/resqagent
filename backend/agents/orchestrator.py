@@ -84,7 +84,8 @@ class AgentOrchestrator:
                 db=db,
                 emergency_type=incident.emergency_type,
                 priority=incident.priority,
-                exclude_responder_ids=[]
+                exclude_responder_ids=[],
+                location=incident.location
             )
 
             selected_responder = selection_result.get("selected_responder")

@@ -207,8 +207,16 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="reg-location">Base Location / Area</label>
-          <input id="reg-location" type="text" class="form-input" placeholder="Sector 4, Central District">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <label class="form-label" for="reg-location" style="margin-bottom: 0;">Base Location / GPS Coordinates</label>
+            <button type="button" class="btn btn-secondary btn-sm gps-detect-btn" onclick="detectGpsLocation('reg-location', 'reg-gps-status')">
+              <span>🛰️</span> Auto-Detect GPS
+            </button>
+          </div>
+          <input id="reg-location" type="text" class="form-input" placeholder="e.g. Sector 4, Central District or Click GPS">
+          <div id="reg-gps-status" style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">
+            Type manual location or click <strong>Auto-Detect GPS</strong> for real-time dispatch accuracy.
+          </div>
         </div>
 
         <!-- Conditional Responder Options -->
@@ -359,8 +367,16 @@
             </div>
 
             <div class="form-group">
-              <label class="form-label" for="input-loc">Location / Coordinates</label>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label class="form-label" for="input-loc" style="margin-bottom: 0;">Location / GPS Coordinates</label>
+                <button type="button" class="btn btn-secondary btn-sm gps-detect-btn" onclick="detectGpsLocation('input-loc', 'incident-gps-status')">
+                  <span>🛰️</span> Auto-Detect GPS
+                </button>
+              </div>
               <input id="input-loc" type="text" class="form-input" value="Crossroad of 5th Ave & Pine St, Sector 3">
+              <div id="incident-gps-status" style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">
+                Location mode: Manual entry or Live GPS broadcast.
+              </div>
             </div>
 
             <button type="submit" class="btn btn-danger" style="width: 100%; padding: 14px;">
