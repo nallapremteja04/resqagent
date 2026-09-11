@@ -27,8 +27,8 @@
 
       <!-- Role-Filtered Navigation Tabs -->
       <nav id="main-nav-tabs" class="role-tabs-container">
-        <button class="role-tab-btn active" data-role="citizen">
-          <span>🆘</span> Citizen SOS
+        <button class="role-tab-btn active" data-role="citizen" title="Emergency SOS Distress Broadcast (15s Countdown)">
+          <span>🆘</span> Emergency SOS
         </button>
         <button class="role-tab-btn" data-role="responder">
           <span>📱</span> Responder Terminal
@@ -46,6 +46,11 @@
           <span>⚙️</span> Admin Panel
         </button>
       </nav>
+
+      <!-- Universal One-Touch Emergency SOS Button (Every User) -->
+      <button id="header-quick-sos-btn" class="header-quick-sos-btn" onclick="triggerGlobalSos()" title="One-Touch Emergency SOS (15s Countdown)">
+        <span>🆘</span> SOS
+      </button>
 
       <!-- Authenticated User Profile & Sign Out -->
       <div id="header-auth-area">
@@ -197,8 +202,8 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="reg-phone">Phone Number</label>
-          <input id="reg-phone" type="tel" class="form-input" placeholder="+1-555-0199">
+          <label class="form-label" for="reg-phone">Phone Number <span style="color: var(--accent-red); font-size: 11px;">* (10 digits)</span></label>
+          <input id="reg-phone" type="tel" class="form-input" placeholder="10-digit mobile number" maxlength="10" pattern="[0-9]{10}" required autocomplete="tel">
         </div>
 
         <div class="form-group">
@@ -304,14 +309,14 @@
               </button>
             </div>
 
-            <!-- SOS 30-Second Countdown Activation Panel -->
+            <!-- SOS 15-Second Countdown Activation Panel -->
             <div id="sos-countdown-container" class="sos-countdown-card" style="display: none;">
               <div class="sos-countdown-header">
                 <span class="pulsing-alert-dot"></span>
                 <span class="sos-countdown-title">SOS ACTIVATION</span>
               </div>
               <div class="sos-countdown-timer-circle">
-                <div id="sos-countdown-number" class="sos-countdown-number">30</div>
+                <div id="sos-countdown-number" class="sos-countdown-number">15</div>
                 <div class="sos-countdown-unit">seconds</div>
               </div>
               <p class="sos-countdown-subtext">Distress broadcast will initiate automatically unless cancelled.</p>
@@ -453,6 +458,20 @@
           <span>🛰️ GPS Connected • Audio Alerting ON</span>
         </div>
 
+        <!-- Field Unit Emergency Distress Alert Bar -->
+        <div class="field-sos-alert-bar">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 20px;">🆘</span>
+            <div>
+              <div style="font-weight: 700; font-size: 13px; color: #991b1b;">Field Unit In Distress?</div>
+              <div style="font-size: 11px; color: #b91c1c;">Trigger 15s SOS countdown to alert command and dispatch backup</div>
+            </div>
+          </div>
+          <button type="button" class="btn btn-danger btn-sm" onclick="triggerGlobalSos()" style="font-weight: 800; padding: 6px 14px; box-shadow: 0 2px 6px rgba(220,38,38,0.3);">
+            <span>🆘</span> Press SOS
+          </button>
+        </div>
+
         <!-- Incoming / Active Call Area -->
         <div id="responder-active-call-area">
           <!-- Populated dynamically by app.js -->
@@ -490,7 +509,12 @@
         <div class="glass-card">
           <div class="card-header">
             <h2 class="card-title"><span>📋</span> Active Emergency Operations Feed</h2>
-            <button class="sim-btn" onclick="refreshAllData()">🔄 Refresh</button>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <button class="btn btn-danger btn-sm" onclick="triggerGlobalSos()" style="font-weight: 700; padding: 5px 12px; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;">
+                <span>🆘</span> Dispatch SOS
+              </button>
+              <button class="sim-btn" onclick="refreshAllData()">🔄 Refresh</button>
+            </div>
           </div>
           <div class="data-table-wrapper">
             <table class="data-table">

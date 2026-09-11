@@ -198,13 +198,16 @@ function filterNavigationByRole(role) {
 
   tabs.forEach(tab => {
     const tabRole = tab.dataset.role;
-    if (r === 'admin') {
+    // The SOS Emergency tab is always available to EVERY user role
+    if (tabRole === 'citizen') {
+      tab.style.display = 'inline-flex';
+    } else if (r === 'admin') {
       tab.style.display = 'inline-flex';
     } else if (r === 'dispatcher') {
-      tab.style.display = ['dispatch', 'timeline', 'report'].includes(tabRole) ? 'inline-flex' : 'none';
+      tab.style.display = ['citizen', 'dispatch', 'timeline', 'report'].includes(tabRole) ? 'inline-flex' : 'none';
     } else if (r === 'responder') {
-      tab.style.display = tabRole === 'responder' ? 'inline-flex' : 'none';
-    } else { // citizen
+      tab.style.display = ['citizen', 'responder'].includes(tabRole) ? 'inline-flex' : 'none';
+    } else { // citizen or guest
       tab.style.display = ['citizen', 'timeline'].includes(tabRole) ? 'inline-flex' : 'none';
     }
   });
@@ -221,6 +224,19 @@ function filterNavigationByRole(role) {
     demoBar.style.display = ['admin', 'dispatcher'].includes(r) ? 'block' : 'none';
   }
 }
+
+// Universal Trigger for SOS (30s Countdown Workflow) for any user role
+function triggerGlobalSos() {
+  switchView('citizen');
+  const tabs = document.querySelectorAll('.role-tab-btn');
+  tabs.forEach(btn => btn.classList.toggle('active', btn.dataset.role === 'citizen'));
+
+  const bigSos = document.getElementById('big-sos-btn');
+  if (bigSos) {
+    bigSos.click();
+  }
+}
+window.triggerGlobalSos = triggerGlobalSos;
 
 // 2. Authentication UI & Form Handlers
 function setupAuthForms() {
@@ -258,6 +274,27 @@ function setupAuthForms() {
     }
   });
 
+  // Restrict phone input to 10 digits
+  function setupPhoneInputFormatter(inputId) {
+    const el = document.getElementById(inputId);
+    if (!el) return;
+
+    el.addEventListener('input', () => {
+      el.value = el.value.replace(/\D/g, '').slice(0, 10);
+    });
+
+    el.addEventListener('blur', () => {
+      const digits = el.value.replace(/\D/g, '');
+      if (digits.length > 0 && digits.length !== 10) {
+        el.style.borderColor = 'var(--accent-red)';
+      } else {
+        el.style.borderColor = '';
+      }
+    });
+  }
+
+  setupPhoneInputFormatter('reg-phone');
+
   // Multi-Role Registration Role Switcher
   window.selectRegRole = function(role) {
     const hiddenInput = document.getElementById('reg-selected-role');
@@ -292,11 +329,24 @@ function setupAuthForms() {
 
     const name = document.getElementById('reg-name').value.trim();
     const email = document.getElementById('reg-email').value.trim();
-    const phone = document.getElementById('reg-phone').value.trim();
+    const phoneInput = document.getElementById('reg-phone');
+    const rawPhone = (phoneInput?.value || '').trim();
     const location = document.getElementById('reg-location').value.trim();
     const password = document.getElementById('reg-password').value;
     const confirmPassword = document.getElementById('reg-confirm').value;
     const role = document.getElementById('reg-selected-role')?.value || 'citizen';
+
+    // 10-digit phone number condition and validation
+    const phoneDigits = rawPhone.replace(/\D/g, '');
+    if (!rawPhone || phoneDigits.length !== 10) {
+      showAuthError("Phone number must contain exactly 10 digits.");
+      if (phoneInput) {
+        phoneInput.focus();
+        phoneInput.style.borderColor = 'var(--accent-red)';
+      }
+      return;
+    }
+    if (phoneInput) phoneInput.style.borderColor = '';
 
     if (password !== confirmPassword) {
       showAuthError("Passwords do not match.");
@@ -310,7 +360,7 @@ function setupAuthForms() {
     const payload = {
       name,
       email,
-      phone,
+      phone: phoneDigits,
       location,
       password,
       confirm_password: confirmPassword,
@@ -634,7 +684,7 @@ function setupCitizenForm() {
   });
 
   let sosCountdownTimer = null;
-  let sosRemainingSeconds = 30;
+  let sosRemainingSeconds = 15;
 
   function cancelSosCountdown() {
     if (sosCountdownTimer) {
@@ -665,9 +715,11 @@ function setupCitizenForm() {
     playSirenPing();
 
     try {
+      const rolePrefix = state.currentUser?.role ? state.currentUser.role.toUpperCase() : 'CITIZEN';
+      const userName = state.currentUser?.name || '';
       const payload = {
         emergency_type: 'Accident',
-        description: 'CRITICAL ONE-TOUCH SOS: Severe distress detected, victim in urgent need of medical assistance.',
+        description: `CRITICAL ONE-TOUCH SOS: Severe distress reported by ${rolePrefix} ${userName}, victim in urgent need of assistance.`,
         location: state.currentUser?.location || 'Downtown Sector 4'
       };
       const created = await api.createIncident(payload);
@@ -690,7 +742,7 @@ function setupCitizenForm() {
   const sosBtn = document.getElementById('big-sos-btn');
   sosBtn?.addEventListener('click', () => {
     if (!state.currentUser) {
-      showAuthOverlay('signin', 'Please sign in or register as a citizen to broadcast emergency SOS.');
+      showAuthOverlay('signin', 'Please sign in or register to broadcast emergency SOS.');
       return;
     }
 
@@ -707,15 +759,19 @@ function setupCitizenForm() {
     if (subtext) subtext.style.display = 'none';
     if (countdownBox) countdownBox.style.display = 'flex';
 
-    sosRemainingSeconds = 30;
+    sosRemainingSeconds = 15;
     if (numberEl) numberEl.innerText = sosRemainingSeconds;
+    playTone(750, 'sine', 0.08);
 
     sosCountdownTimer = setInterval(async () => {
       sosRemainingSeconds--;
       if (numberEl) numberEl.innerText = sosRemainingSeconds;
 
-      if (sosRemainingSeconds <= 5 && sosRemainingSeconds > 0) {
-        playTone(880, 'sine', 0.06);
+      // Audible countdown beep on every second with increasing urgency
+      if (sosRemainingSeconds > 5) {
+        playTone(750, 'sine', 0.08);
+      } else if (sosRemainingSeconds > 0) {
+        playTone(950, 'sawtooth', 0.12);
       }
 
       if (sosRemainingSeconds <= 0) {
@@ -726,7 +782,7 @@ function setupCitizenForm() {
         if (btnWrapper) btnWrapper.style.display = 'flex';
         if (subtext) subtext.style.display = 'block';
 
-        // 30 seconds completed: Execute EXISTING SOS functionality
+        // 15 seconds completed: Execute EXISTING SOS functionality
         await executeExistingSosBroadcast();
       }
     }, 1000);
