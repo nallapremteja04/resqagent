@@ -69,7 +69,7 @@ def simulate_responder_timeout(
     
     assignment.assignment_status = "TIMEOUT"
     assignment.responded_at = datetime.utcnow()
-    assignment.notes = f"SLA Breached: Responder did not acknowledge within 30s timeout window (Simulated by {current_user.name})."
+    assignment.notes = f"SLA Breached: Responder did not acknowledge within 5s timeout window (Simulated by {current_user.name})."
     
     if responder:
         responder.availability = "AVAILABLE"
@@ -80,7 +80,7 @@ def simulate_responder_timeout(
     event = IncidentTimeline(
         incident_id=incident.id,
         event_type="SLA_TIMEOUT_EXPIRED",
-        description=f"Monitoring Agent: SLA expired (30s) for {responder.name if responder else 'Responder'}. Escalating.",
+        description=f"Monitoring Agent: SLA expired (5s) for {responder.name if responder else 'Responder'}. Escalating.",
         actor="Monitoring Agent"
     )
     db.add(event)

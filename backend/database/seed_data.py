@@ -1,6 +1,12 @@
 from sqlalchemy.orm import Session
 from backend.models.responder import Responder
 from backend.models.user import User
+from backend.models.incident import Incident
+from backend.models.assignment import Assignment
+from backend.models.notification import Notification
+from backend.models.incident_timeline import IncidentTimeline
+from backend.models.agent_action import AgentAction
+from backend.models.report import Report
 from backend.core.security import hash_password
 
 def seed_database(db: Session, force: bool = False):
@@ -13,6 +19,12 @@ def seed_database(db: Session, force: bool = False):
     - Anita: 4.5 km, Available (Emergency Police Patrol)
     """
     if force:
+        db.query(Report).delete()
+        db.query(AgentAction).delete()
+        db.query(IncidentTimeline).delete()
+        db.query(Notification).delete()
+        db.query(Assignment).delete()
+        db.query(Incident).delete()
         db.query(Responder).delete()
         # Preserve administrators during fixture cleanup
         db.query(User).filter(User.role != "admin").delete()

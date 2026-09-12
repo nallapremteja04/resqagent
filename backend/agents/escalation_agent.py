@@ -23,8 +23,6 @@ class EscalationAgent:
     5. Logs cognitive reasoning
     """
 
-    MAX_ESCALATION_ATTEMPTS = 3
-
     @classmethod
     def execute_escalation(
         cls,
@@ -36,10 +34,11 @@ class EscalationAgent:
         if not incident:
             return {"status": "ERROR", "message": "Incident not found"}
 
-        # Gather past assignments to build blacklist
+        # Gather past assignments for this incident
         past_assignments = (
             db.query(Assignment)
             .filter(Assignment.incident_id == incident_id)
+            .order_by(Assignment.id.asc())
             .all()
         )
         excluded_ids = [a.responder_id for a in past_assignments]
@@ -47,33 +46,23 @@ class EscalationAgent:
 
         last_assignment = past_assignments[-1] if past_assignments else None
         failed_responder_name = "Assigned Unit"
+        failed_resp_id = None
         if last_assignment:
+            failed_resp_id = last_assignment.responder_id
             failed_resp = db.query(Responder).filter(Responder.id == last_assignment.responder_id).first()
             if failed_resp:
                 failed_responder_name = failed_resp.name
-
-        # Enforce safety guard: if attempts exceed max, escalate directly to Central Human Dispatch
-        if attempt_number > cls.MAX_ESCALATION_ATTEMPTS:
-            incident.status = "ESCALATED_TO_DISPATCH"
-            db.commit()
-            
-            action = AgentAction(
-                incident_id=incident.id,
-                agent_name="EscalationAgent",
-                action_type="MAX_ESCALATION_EXCEEDED",
-                input_data=json.dumps({"attempt": attempt_number, "reason": reason}),
-                output_data=json.dumps({"action": "MANUAL_DISPATCH_TAKEOVER"}),
-                reasoning=f"Exceeded {cls.MAX_ESCALATION_ATTEMPTS} autonomous reassignment attempts. Transferred to Human Dispatch."
-            )
-            db.add(action)
-            db.commit()
-            return {"status": "ESCALATED_TO_DISPATCH", "message": "Manual dispatch required."}
+                if failed_resp.availability == "PENDING_CONFIRMATION" and failed_resp.active_incident_id == incident.id:
+                    failed_resp.availability = "AVAILABLE"
+                    failed_resp.active_incident_id = None
+                    db.commit()
 
         # 1. Adapt state to RESPONDER_SEARCH
         incident.status = "RESPONDER_SEARCH"
         db.commit()
 
-        # 2. Select replacement candidate
+        # 2. Select replacement candidate with unlimited continuous rotation
+        # First attempt: find candidate excluding previously attempted responders in current rotation
         selection_result = ResponderSelectionAgent.select_best_responder(
             db=db,
             emergency_type=incident.emergency_type,
@@ -81,20 +70,66 @@ class EscalationAgent:
             exclude_responder_ids=excluded_ids,
             location=incident.location
         )
-
         new_responder = selection_result.get("selected_responder")
+
+        # Unlimited Escalation: If all available responders have been tried in this round,
+        # reset and cycle the fleet round-robin, excluding only the immediate last responder.
+        if not new_responder:
+            immediate_exclude = [failed_resp_id] if failed_resp_id else []
+            for past_a in past_assignments:
+                past_r = db.query(Responder).filter(Responder.id == past_a.responder_id).first()
+                if past_r and past_r.availability in ["PENDING_CONFIRMATION", "BUSY"] and past_r.active_incident_id == incident.id:
+                    past_r.availability = "AVAILABLE"
+                    past_r.active_incident_id = None
+            db.commit()
+
+            selection_result = ResponderSelectionAgent.select_best_responder(
+                db=db,
+                emergency_type=incident.emergency_type,
+                priority=incident.priority,
+                exclude_responder_ids=immediate_exclude,
+                location=incident.location
+            )
+            new_responder = selection_result.get("selected_responder")
+
+        # If still none (e.g. single-unit fleet or strictly 1 unit available), retry with no exclusions
+        if not new_responder:
+            selection_result = ResponderSelectionAgent.select_best_responder(
+                db=db,
+                emergency_type=incident.emergency_type,
+                priority=incident.priority,
+                exclude_responder_ids=[],
+                location=incident.location
+            )
+            new_responder = selection_result.get("selected_responder")
+
+        # Fallback for unlimited escalation: if all responders were marked PENDING/BUSY,
+        # release the closest non-offline responder to maintain continuous escalation loop
+        if not new_responder:
+            fallback_resp = (
+                db.query(Responder)
+                .filter(Responder.availability != "OFFLINE")
+                .order_by(Responder.distance.asc())
+                .first()
+            )
+            if fallback_resp:
+                fallback_resp.availability = "AVAILABLE"
+                fallback_resp.active_incident_id = None
+                db.commit()
+                new_responder = fallback_resp
+
         if not new_responder:
             incident.status = "UNABLE_TO_ASSIGN"
             db.commit()
-            return {"status": "UNABLE_TO_ASSIGN", "reason": "No remaining available responders."}
+            return {"status": "UNABLE_TO_ASSIGN", "reason": "No registered responders in fleet."}
 
-        # 3. Create new assignment
+        # 3. Create new assignment in unlimited escalation sequence
         new_assignment = Assignment(
             incident_id=incident.id,
             responder_id=new_responder.id,
             assignment_status="PENDING",
             attempt_number=attempt_number,
-            notes=f"Escalation Attempt #{attempt_number}. Reassigned from {failed_responder_name}."
+            notes=f"Escalation Attempt #{attempt_number} (Unlimited Loop). Reassigned from {failed_responder_name}."
         )
         db.add(new_assignment)
 
@@ -114,17 +149,21 @@ class EscalationAgent:
                 "failed_unit": failed_responder_name,
                 "reason": reason,
                 "attempt": attempt_number,
+                "mode": "unlimited_until_resolved",
                 "excluded_units": excluded_ids
             }),
             output_data=json.dumps({
                 "reassigned_unit": new_responder.name,
                 "distance_km": new_responder.distance,
-                "specialization": new_responder.specialization
+                "specialization": new_responder.specialization,
+                "attempt_number": attempt_number
             }),
             reasoning=(
-                f"Adaptive recovery: Unit '{failed_responder_name}' dropped out ({reason}). "
-                f"Escalation Agent searched pool excluding {excluded_ids} and selected "
-                f"'{new_responder.name}' ({new_responder.distance} km away)."
+                f"Autonomous adaptive escalation (Attempt #{attempt_number}, unlimited mode): "
+                f"Unit '{failed_responder_name}' dropped out ({reason}). "
+                f"Escalation Agent cycled available candidates and engaged "
+                f"'{new_responder.name}' ({new_responder.distance} km away). "
+                f"Loop remains active until emergency is accepted and resolved."
             )
         )
         db.add(action_log)
@@ -133,7 +172,7 @@ class EscalationAgent:
         timeline_log = IncidentTimeline(
             incident_id=incident.id,
             event_type="AUTONOMOUS_ESCALATION",
-            description=f"Escalated: {failed_responder_name} dropped. New unit {new_responder.name} assigned.",
+            description=f"Escalation #{attempt_number}: {failed_responder_name} dropped. New unit {new_responder.name} assigned (Unlimited adaptive loop).",
             actor="Escalation Agent"
         )
         db.add(timeline_log)

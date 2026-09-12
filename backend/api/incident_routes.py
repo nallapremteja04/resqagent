@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -77,17 +78,18 @@ def create_incident(
     return incident
 
 def check_timed_out_assignments(db: Session):
-    """Auto-detects and escalates assignments exceeding 30s SLA window."""
+    """Auto-detects and escalates assignments exceeding 5s SLA window."""
+    timeout_sec = int(os.getenv("RESPONDER_TIMEOUT_SECONDS", "5"))
     pending_assignments = (
         db.query(Assignment)
         .filter(Assignment.assignment_status == "PENDING")
         .all()
     )
     for pa in pending_assignments:
-        if pa.assigned_at and (datetime.utcnow() - pa.assigned_at).total_seconds() > 30:
+        if pa.assigned_at and (datetime.utcnow() - pa.assigned_at).total_seconds() > timeout_sec:
             pa.assignment_status = "TIMEOUT"
             pa.responded_at = datetime.utcnow()
-            pa.notes = "SLA Timeout: Responder did not acknowledge within 30-second window."
+            pa.notes = f"SLA Timeout: Responder did not acknowledge within {timeout_sec}-second window."
             resp = db.query(Responder).filter(Responder.id == pa.responder_id).first()
             if resp:
                 resp.availability = "AVAILABLE"
@@ -99,7 +101,7 @@ def check_timed_out_assignments(db: Session):
             db.add(IncidentTimeline(
                 incident_id=pa.incident_id,
                 event_type="SLA_TIMEOUT_EXPIRED",
-                description=f"Responder {resp.name if resp else 'Unit'} TIMED OUT (30s SLA expired). Escalating.",
+                description=f"Responder {resp.name if resp else 'Unit'} TIMED OUT ({timeout_sec}s SLA expired). Escalating.",
                 actor="Monitoring Agent"
             ))
             db.add(Notification(
@@ -112,7 +114,7 @@ def check_timed_out_assignments(db: Session):
             db.commit()
             try:
                 from backend.agents.orchestrator import run_escalation_cycle
-                run_escalation_cycle(pa.incident_id, reason="SLA Timeout Expired (30s Window)")
+                run_escalation_cycle(pa.incident_id, reason=f"SLA Timeout Expired ({timeout_sec}s Window)")
             except Exception:
                 pass
 

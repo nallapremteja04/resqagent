@@ -287,8 +287,54 @@ def run_tests():
     finally:
         db.close()
 
+    # -------------------------------------------------------------------------
+    # TEST 11: Unlimited Escalation Loop (exceeds 3 attempts, cycles infinitely until resolved)
+    # -------------------------------------------------------------------------
+    print("\n[TEST 11] Unlimited Escalation Loop (No 3-attempt limit, cycles until resolved)")
+    inc11_res = client.post("/api/incidents/", headers=citizen_headers, json={
+        "emergency_type": "Medical",
+        "description": "Critical stroke symptoms, immediate doctor needed",
+        "location": "Central Square Tower"
+    })
+    assert inc11_res.status_code == 201
+    inc11_id = inc11_res.json()["id"]
+
+    # Trigger 6 consecutive timeouts (exceeding old 3-attempt cutoff)
+    for attempt in range(1, 7):
+        assigns = client.get(f"/api/assignments/?incident_id={inc11_id}", headers=admin_headers).json()
+        current_assign = assigns[0]
+        assert current_assign["assignment_status"] == "PENDING"
+        assert current_assign["attempt_number"] == attempt
+        
+        # Timeout the current assignment
+        t_res = client.post(f"/api/assignments/{current_assign['id']}/timeout", headers=admin_headers)
+        assert t_res.status_code == 200
+
+    # Verify that incident status is STILL active (NOT locked in ESCALATED_TO_DISPATCH or UNABLE_TO_ASSIGN)
+    inc11_check = client.get(f"/api/incidents/{inc11_id}", headers=citizen_headers).json()
+    assert inc11_check["status"] == "WAITING_FOR_RESPONSE"
+    
+    # 7th assignment exists and can be accepted to resolve the incident
+    assigns_7 = client.get(f"/api/assignments/?incident_id={inc11_id}", headers=admin_headers).json()
+    active_assign_7 = assigns_7[0]
+    assert active_assign_7["attempt_number"] == 7
+    assert active_assign_7["assignment_status"] == "PENDING"
+
+    # Accept on attempt 7
+    accept_7 = client.post(f"/api/assignments/{active_assign_7['id']}/respond", headers=admin_headers, json={"status": "ACCEPTED"})
+    assert accept_7.status_code == 200
+    
+    # Resolve
+    resolve_7 = client.post(f"/api/assignments/{active_assign_7['id']}/progress", headers=admin_headers, json={"status": "COMPLETED"})
+    assert resolve_7.status_code == 200
+
+    inc11_final = client.get(f"/api/incidents/{inc11_id}", headers=citizen_headers).json()
+    assert inc11_final["status"] == "RESOLVED"
+    print(f"   [PASS] Verified: Autonomous escalation executed 7 consecutive rounds without cutoff.")
+    print(f"   [PASS] Verified: Unlimited escalation remained active until accepted and resolved.")
+
     print("\n================================================================================")
-    print("ALL 10 VERIFICATION TESTS PASSED SUCCESSFULLY (10/10)")
+    print("ALL 11 VERIFICATION TESTS PASSED SUCCESSFULLY (11/11)")
     print("================================================================================")
 
 if __name__ == "__main__":

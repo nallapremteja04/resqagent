@@ -12,7 +12,7 @@ class MonitoringAgent:
     and assistance progress. Flags anomalies and timeout breaches.
     """
 
-    DEFAULT_TIMEOUT_SECONDS = int(os.getenv("RESPONDER_TIMEOUT_SECONDS", "30"))
+    DEFAULT_TIMEOUT_SECONDS = int(os.getenv("RESPONDER_TIMEOUT_SECONDS", "5"))
 
     @classmethod
     def check_assignment_health(

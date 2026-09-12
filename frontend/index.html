@@ -52,6 +52,12 @@
         <span>🆘</span> SOS
       </button>
 
+      <!-- Live Real-Time Date & Time Clock -->
+      <div id="header-live-clock" class="header-live-clock" title="Current Local Date & Time">
+        <span class="clock-pulse"></span>
+        <span id="live-date-time-display">--</span>
+      </div>
+
       <!-- Authenticated User Profile & Sign Out -->
       <div id="header-auth-area">
         <!-- Logged out state (default) -->
@@ -87,8 +93,8 @@
         <button id="btn-scenario-2" class="sim-btn primary" title="Run Adaptive Flow: Highway Crash -> Suresh Timeout -> Auto Escalates to Ravi">
           ▶ Scenario 2 (Adaptive Escalation)
         </button>
-        <button id="btn-timeout-sim" class="sim-btn danger" title="Simulates 30s SLA Timeout on Suresh to trigger Escalation Agent">
-          ⏱️ Simulate Suresh Timeout (30s SLA)
+        <button id="btn-timeout-sim" class="sim-btn danger" title="Simulates 5s SLA Timeout on Suresh to trigger Escalation Agent">
+          ⏱️ Simulate Suresh Timeout (5s SLA)
         </button>
         <button id="btn-reset-sim" class="sim-btn" title="Reset all demo records and restore pristine state">
           🔄 Reset Demo Fleet
@@ -397,8 +403,9 @@
               <span id="tracker-inc-id" style="font-family: var(--font-mono); font-weight: 700; color: var(--accent-blue);">INC-101</span>
               <span id="tracker-type" style="font-weight: 700; color: var(--text-primary);">Road Accident</span>
             </div>
-            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 4px;">
-              📍 <span id="tracker-loc">Highway 101</span>
+            <div style="display: flex; justify-content: space-between; font-size: 13px; color: var(--text-secondary); margin-bottom: 4px;">
+              <div>📍 <span id="tracker-loc">Highway 101</span></div>
+              <div style="font-size: 11px; color: var(--text-muted);">🕒 Reported: <span id="tracker-time">--</span></div>
             </div>
             <p id="tracker-desc" style="font-size: 12px; color: var(--text-muted); line-height: 1.4;">
               Emergency in progress.
@@ -511,7 +518,7 @@
         </div>
         <div class="glass-card" style="padding: 16px;">
           <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Autonomous SLA Target</div>
-          <div style="font-family: var(--font-heading); font-size: 28px; font-weight: 800; color: #93c5fd;">30s</div>
+          <div style="font-family: var(--font-heading); font-size: 28px; font-weight: 800; color: #93c5fd;">5s</div>
         </div>
         <div class="glass-card" style="padding: 16px;">
           <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">System State</div>

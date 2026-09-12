@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -207,7 +208,7 @@ def timeout_assignment(
     db: Session = Depends(get_db)
 ):
     """
-    Handles assignment timeout when the 30-second acceptance timer expires without response.
+    Handles assignment timeout when the 5-second acceptance timer expires without response.
     Idempotent and race-condition safe: if assignment is not PENDING, returns current state.
     """
     assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
@@ -218,12 +219,13 @@ def timeout_assignment(
     if assignment.assignment_status != "PENDING":
         return assignment
 
+    timeout_sec = int(os.getenv("RESPONDER_TIMEOUT_SECONDS", "5"))
     responder = db.query(Responder).filter(Responder.id == assignment.responder_id).first()
     incident = db.query(Incident).filter(Incident.id == assignment.incident_id).first()
 
     assignment.assignment_status = "TIMEOUT"
     assignment.responded_at = datetime.utcnow()
-    assignment.notes = "SLA Timeout: Responder did not respond within 30 seconds."
+    assignment.notes = f"SLA Timeout: Responder did not respond within {timeout_sec} seconds."
 
     if responder:
         responder.availability = "AVAILABLE"
@@ -235,7 +237,7 @@ def timeout_assignment(
     timeline_event = IncidentTimeline(
         incident_id=assignment.incident_id,
         event_type="SLA_TIMEOUT_EXPIRED",
-        description=f"Responder {responder.name if responder else 'Unit'} TIMED OUT (30s SLA expired). Escalating.",
+        description=f"Responder {responder.name if responder else 'Unit'} TIMED OUT ({timeout_sec}s SLA expired). Escalating.",
         actor="Monitoring Agent"
     )
     db.add(timeline_event)
@@ -262,12 +264,13 @@ def timeout_assignment(
     db.commit()
     db.refresh(assignment)
 
+    # Trigger Escalation Agent with cognitive loop
     try:
         from backend.agents.orchestrator import run_escalation_cycle
         background_tasks.add_task(
             run_escalation_cycle,
             incident.id,
-            reason=f"SLA Timeout: Responder {responder.name if responder else 'Unit'} did not respond within 30 seconds"
+            reason=f"SLA Timeout: Responder {responder.name if responder else 'Unit'} did not respond within {timeout_sec} seconds"
         )
     except ImportError:
         pass

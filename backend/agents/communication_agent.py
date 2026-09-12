@@ -25,7 +25,7 @@ class CommunicationAgent:
 
         # 1. Alert to Responder
         resp_msg = (
-            f"New emergency assignment. Please respond within 30 seconds. "
+            f"New emergency assignment. Please respond within 5 seconds. "
             f"({incident.priority} {incident.emergency_type} at {incident.location}: {incident.description})"
         )
         n_resp = Notification(
@@ -54,7 +54,7 @@ class CommunicationAgent:
         # 3. Alert to Central Dispatch
         dispatch_msg = (
             f"LOG [{incident.priority}]: Incident #{incident.id} ({incident.emergency_type}) assigned to "
-            f"{responder.name} ({responder.role}). Awaiting 30s confirmation."
+            f"{responder.name} ({responder.role}). Awaiting 5s confirmation."
         )
         n_dispatch = Notification(
             incident_id=incident.id,

@@ -50,6 +50,7 @@ function playSirenPing() {
 
 // Initialization & Route Guard
 async function initApp() {
+  setupLiveClock();
   setupNavigation();
   setupAuthForms();
   setupCitizenForm();
@@ -574,7 +575,7 @@ function startPolling() {
   refreshAllData();
   state.pollingTimer = setInterval(() => {
     refreshAllData();
-  }, 3000);
+  }, 1500);
   state.clockTimer = setInterval(() => {
     if (state.currentRole === 'dispatch') {
       updateDispatchBoardTimers();
@@ -621,6 +622,17 @@ async function refreshAllData() {
     if (['dispatcher', 'admin'].includes(state.currentUser.role.toLowerCase())) {
       const responders = await api.getResponders().catch(() => []);
       updateGlobalMetrics(incidents, responders);
+    }
+
+    // Background alert check for logged-in responder
+    if (state.currentUser?.role === 'responder' && state.currentRole !== 'responder') {
+      const userAssignments = await api.getAssignments().catch(() => []);
+      const pendingCall = userAssignments.find(a => a.assignment_status === 'PENDING');
+      if (pendingCall) {
+        startResponderSosAlertBeep();
+      } else {
+        stopResponderSosAlertBeep();
+      }
     }
   } catch (err) {
     console.warn('Sync poll notice:', err.message);
@@ -913,6 +925,11 @@ function renderCitizenTracker() {
   document.getElementById('tracker-loc').innerText = inc.location;
   document.getElementById('tracker-desc').innerText = inc.description;
 
+  const timeEl = document.getElementById('tracker-time');
+  if (timeEl) {
+    timeEl.innerText = formatDateTime(inc.created_at);
+  }
+
   const pBadge = document.getElementById('tracker-priority');
   pBadge.className = `badge badge-${(inc.priority || 'p3').toLowerCase().slice(0, 2)}`;
   pBadge.innerText = inc.priority || 'Analyzing';
@@ -957,18 +974,104 @@ function parseUtcDate(dateStr) {
   return isNaN(parsed) ? Date.now() : parsed;
 }
 
+function formatDateTime(dateStr) {
+  if (!dateStr) return '—';
+  const d = new Date(parseUtcDate(dateStr));
+  return d.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  });
+}
+
+function formatTime(dateStr) {
+  if (!dateStr) return '—';
+  const d = new Date(parseUtcDate(dateStr));
+  return d.toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  });
+}
+
+function setupLiveClock() {
+  updateLiveDateTime();
+  setInterval(updateLiveDateTime, 1000);
+}
+
+function updateLiveDateTime() {
+  const el = document.getElementById('live-date-time-display');
+  if (!el) return;
+  const now = new Date();
+  const options = {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  };
+  el.innerText = now.toLocaleString(undefined, options);
+}
+
+// Emergency Responder SOS Alert Beep Notification Engine
+let responderSosBeepTimer = null;
+
+function playResponderSosAlertBeep() {
+  if (!state.soundEnabled || !audioCtx) return;
+  try {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    // High-urgency dual-tone alert beep for responder SOS notification (880Hz + 1175Hz)
+    playTone(880, 'sine', 0.12);
+    setTimeout(() => {
+      if (responderSosBeepTimer) {
+        playTone(1175, 'triangle', 0.16);
+      }
+    }, 140);
+  } catch (e) {
+    // Audio context safety fallback
+  }
+}
+
+function startResponderSosAlertBeep() {
+  if (responderSosBeepTimer) return;
+  playResponderSosAlertBeep();
+  responderSosBeepTimer = setInterval(() => {
+    playResponderSosAlertBeep();
+  }, 900); // Rhythmic SOS alert beep until responder accepts or declines
+}
+
+function stopResponderSosAlertBeep() {
+  if (responderSosBeepTimer) {
+    clearInterval(responderSosBeepTimer);
+    responderSosBeepTimer = null;
+  }
+}
+
+window.startResponderSosAlertBeep = startResponderSosAlertBeep;
+window.stopResponderSosAlertBeep = stopResponderSosAlertBeep;
+
 function startResponderAcceptanceTimer(assignmentId, assignedAtStr) {
   const assignedAt = parseUtcDate(assignedAtStr);
 
+  // Sound continuous emergency SOS alert beep until accepted or declined
+  startResponderSosAlertBeep();
+
   const updateTick = async () => {
     const elapsed = Math.floor((Date.now() - assignedAt) / 1000);
-    const remaining = Math.max(0, 30 - elapsed);
+    const remaining = Math.max(0, 5 - elapsed);
 
     const displayEl = document.getElementById('resp-timer-display');
     const countEl = document.getElementById('resp-sec-count');
     if (displayEl) {
       displayEl.innerText = `00:${remaining < 10 ? '0' + remaining : remaining}`;
-      if (remaining <= 10) {
+      if (remaining <= 2) {
         displayEl.classList.add('urgent');
       } else {
         displayEl.classList.remove('urgent');
@@ -976,11 +1079,12 @@ function startResponderAcceptanceTimer(assignmentId, assignedAtStr) {
     }
     if (countEl) countEl.innerText = remaining;
 
-    if (remaining <= 5 && remaining > 0) {
+    if (remaining <= 2 && remaining > 0) {
       playTone(660, 'sine', 0.05);
     }
 
     if (remaining <= 0) {
+      stopResponderSosAlertBeep();
       stopResponderAcceptanceTimer();
       await handleAssignmentTimeout(assignmentId);
     }
@@ -999,6 +1103,7 @@ function startResponderAcceptanceTimer(assignmentId, assignedAtStr) {
 }
 
 function stopResponderAcceptanceTimer() {
+  stopResponderSosAlertBeep();
   if (responderAcceptanceTimer) {
     clearInterval(responderAcceptanceTimer);
     responderAcceptanceTimer = null;
@@ -1093,7 +1198,7 @@ async function renderResponderTerminal() {
 
   if (activeAssignment.assignment_status === 'PENDING') {
     const elapsed = Math.floor((Date.now() - parseUtcDate(activeAssignment.assigned_at)) / 1000);
-    const initialRemaining = Math.max(0, 30 - elapsed);
+    const initialRemaining = Math.max(0, 5 - elapsed);
     const clockText = `00:${initialRemaining < 10 ? '0' + initialRemaining : initialRemaining}`;
 
     if (initialRemaining <= 0) {
@@ -1138,7 +1243,7 @@ async function renderResponderTerminal() {
             <div class="resp-timer-label">Response Required</div>
             <div class="resp-timer-sub">Accept in: <span id="resp-sec-count">${initialRemaining}</span>s</div>
           </div>
-          <div id="resp-timer-display" class="resp-timer-clock ${initialRemaining <= 10 ? 'urgent' : ''}">${clockText}</div>
+          <div id="resp-timer-display" class="resp-timer-clock ${initialRemaining <= 2 ? 'urgent' : ''}">${clockText}</div>
         </div>
 
         <div style="display: flex; gap: 12px;">
@@ -1177,7 +1282,7 @@ async function renderResponderTerminal() {
           <div><strong style="color: var(--text-muted);">Location:</strong> ${inc.location}</div>
           <div><strong style="color: var(--text-muted);">Caller:</strong> ${inc.reporter_name || 'Citizen'}</div>
           <div><strong style="color: var(--text-muted);">Attempt:</strong> #${activeAssignment.attempt_number}</div>
-          <div><strong style="color: var(--text-muted);">Assigned At:</strong> ${new Date(parseUtcDate(activeAssignment.assigned_at)).toLocaleTimeString()}</div>
+          <div><strong style="color: var(--text-muted);">Assigned At:</strong> ${formatTime(activeAssignment.assigned_at)}</div>
         </div>
 
         <div style="display: flex; gap: 12px; flex-wrap: wrap;">
@@ -1243,9 +1348,9 @@ function updateDispatchBoardTimers() {
     const raw = el.dataset.assignedAt;
     if (!raw) return;
     const elapsed = Math.floor((Date.now() - parseUtcDate(raw)) / 1000);
-    const remaining = Math.max(0, 30 - elapsed);
+    const remaining = Math.max(0, 5 - elapsed);
     el.innerText = `00:${remaining < 10 ? '0' + remaining : remaining}`;
-    if (remaining <= 10) {
+    if (remaining <= 2) {
       el.classList.add('urgent');
     } else {
       el.classList.remove('urgent');
@@ -1302,9 +1407,9 @@ async function renderDispatchBoard(incidentsList = null) {
       if (inc.status === 'WAITING_FOR_RESPONSE') {
         const rawTime = inc.updated_at || inc.created_at;
         const elapsed = Math.floor((Date.now() - parseUtcDate(rawTime)) / 1000);
-        const remaining = Math.max(0, 30 - elapsed);
+        const remaining = Math.max(0, 5 - elapsed);
         statusBadge = `<span class="badge badge-busy">WAITING FOR RESPONSE</span>`;
-        timerActionDisplay = `<span class="resp-timer-clock dispatch-timer-clock ${remaining <= 10 ? 'urgent' : ''}" data-assigned-at="${rawTime}" style="font-size: 13px; padding: 2px 8px;">00:${remaining < 10 ? '0' + remaining : remaining}</span>`;
+        timerActionDisplay = `<span class="resp-timer-clock dispatch-timer-clock ${remaining <= 2 ? 'urgent' : ''}" data-assigned-at="${rawTime}" style="font-size: 13px; padding: 2px 8px;">00:${remaining < 10 ? '0' + remaining : remaining}</span>`;
       } else if (inc.status === 'NO_RESPONSE') {
         statusBadge = `<span class="badge badge-p1">TIMEOUT</span>`;
         timerActionDisplay = `<span style="color: #ef4444; font-weight: 700; font-size: 11px;">ESCALATING...</span>`;
@@ -1388,7 +1493,7 @@ async function renderCognitiveTimeline() {
         <div class="timeline-content-card">
           <div class="timeline-header-row">
             <span class="timeline-actor">${act.agent_name}</span>
-            <span class="timeline-time">${new Date(act.created_at).toLocaleTimeString()}</span>
+            <span class="timeline-time">${formatTime(act.created_at)}</span>
           </div>
           <div style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin-bottom: 4px;">
             ACTION: ${act.action_type}
