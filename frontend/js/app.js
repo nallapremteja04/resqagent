@@ -19,7 +19,7 @@ const state = {
 // Web Audio API Sound Synthesizer
 const audioCtx = (window.AudioContext || window.webkitAudioContext) ? new (window.AudioContext || window.webkitAudioContext)() : null;
 
-function playTone(freq, type = 'sine', duration = 0.2) {
+function playTone(freq, type = 'sine', duration = 0.2, volume = 0.6) {
   if (!state.soundEnabled || !audioCtx) return;
   try {
     if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -27,7 +27,8 @@ function playTone(freq, type = 'sine', duration = 0.2) {
     const gain = audioCtx.createGain();
     osc.type = type;
     osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    const safeVolume = Math.min(Math.max(volume, 0.05), 1.0);
+    gain.gain.setValueAtTime(safeVolume, audioCtx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
     osc.connect(gain);
     gain.connect(audioCtx.destination);
@@ -835,17 +836,17 @@ function setupCitizenForm() {
 
     sosRemainingSeconds = 15;
     if (numberEl) numberEl.innerText = sosRemainingSeconds;
-    playTone(750, 'sine', 0.08);
+    playTone(750, 'sine', 0.12, 0.75);
 
     sosCountdownTimer = setInterval(async () => {
       sosRemainingSeconds--;
       if (numberEl) numberEl.innerText = sosRemainingSeconds;
 
-      // Audible countdown beep on every second with increasing urgency
+      // Audible countdown beep on every second with high amplified volume
       if (sosRemainingSeconds > 5) {
-        playTone(750, 'sine', 0.08);
+        playTone(750, 'sine', 0.12, 0.75);
       } else if (sosRemainingSeconds > 0) {
-        playTone(950, 'sawtooth', 0.12);
+        playTone(950, 'sawtooth', 0.16, 0.85);
       }
 
       if (sosRemainingSeconds <= 0) {
@@ -1027,13 +1028,13 @@ function playResponderSosAlertBeep() {
   if (!state.soundEnabled || !audioCtx) return;
   try {
     if (audioCtx.state === 'suspended') audioCtx.resume();
-    // High-urgency dual-tone alert beep for responder SOS notification (880Hz + 1175Hz)
-    playTone(880, 'sine', 0.12);
+    // High-urgency dual-tone alert beep for responder SOS notification (loud, amplified 0.85 volume)
+    playTone(900, 'sine', 0.16, 0.85);
     setTimeout(() => {
       if (responderSosBeepTimer) {
-        playTone(1175, 'triangle', 0.16);
+        playTone(1200, 'triangle', 0.20, 0.9);
       }
-    }, 140);
+    }, 150);
   } catch (e) {
     // Audio context safety fallback
   }
@@ -1080,7 +1081,7 @@ function startResponderAcceptanceTimer(assignmentId, assignedAtStr) {
     if (countEl) countEl.innerText = remaining;
 
     if (remaining <= 2 && remaining > 0) {
-      playTone(660, 'sine', 0.05);
+      playTone(720, 'sine', 0.1, 0.75);
     }
 
     if (remaining <= 0) {
